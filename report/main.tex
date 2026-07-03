@@ -1,0 +1,255 @@
+\documentclass[11pt]{article}
+
+% arXiv/NeurIPS-style single-column article. Compiles on Overleaf out of the box
+% (only standard packages). Swap in neurips_2024.sty if a specific style is required.
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{hyperref}
+\usepackage{natbib}
+\usepackage{xcolor}
+
+\graphicspath{{figures/}}
+\hypersetup{colorlinks=true, linkcolor=blue, citecolor=blue, urlcolor=blue}
+
+\title{\textbf{Generative Latent Models for DeepSDF:\\
+Gaussian vs.\ Diffusion in the Small-Data Regime}}
+\author{Amit Benbenishti \\ Deep Learning for 3D Computer Vision, Hebrew University of Jerusalem}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+DeepSDF~\citep{park2019deepsdf} represents a shape category with one MLP and a
+per-shape latent code, but it does not learn a \emph{distribution} over those
+codes, so drawing new codes at random rarely decodes to a valid shape. Latent
+diffusion (3D-LDM~\citep{nam2022lion3dldm}) fixes this at full ShapeNet scale,
+but its benefit over a trivial Gaussian prior in the low-data, low-capacity
+regime is unstudied. We train a DeepSDF auto-decoder, freeze it, and fit two
+generators over the resulting codes---a multivariate Gaussian and a DDPM
+denoising the codes directly---and compare them on a controlled grid of dataset
+sizes $N \in \{10,50,150\}$ and latent dimensions $D \in \{16,32\}$. We evaluate
+reconstruction (Chamfer, IoU) and generation (Coverage, MMD, 1-NN accuracy).
+Our study characterizes exactly when the added complexity of diffusion pays off:
+at very small $N$ the Gaussian is competitive with---and often
+indistinguishable from---the DDPM, consistent with a negative result for
+diffusion in the minimal-resource setting.
+\end{abstract}
+
+\section{Introduction and Related Work}
+
+\paragraph{Implicit shape representations.}
+A signed distance function (SDF) represents a surface implicitly as the zero
+level set of $f:\mathbb{R}^3 \to \mathbb{R}$, where $f(\mathbf{x})$ is the signed
+distance from $\mathbf{x}$ to the surface (negative inside). DeepSDF
+\citep{park2019deepsdf} learns a \emph{single} MLP $f_\theta(\mathbf{z},
+\mathbf{x})$ shared across a shape category, conditioning on a per-shape latent
+code $\mathbf{z}$; the surface for code $\mathbf{z}$ is $\{\mathbf{x} :
+f_\theta(\mathbf{z}, \mathbf{x}) = 0\}$, extracted with Marching Cubes
+\citep{lorensen1987marchingcubes}. It is trained as an \emph{auto-decoder}: the
+codes are free parameters optimized jointly with $\theta$. Occupancy Networks
+\citep{mescheder2019occnet} and IM-Net \citep{chen2019imnet} are contemporaneous
+implicit representations, and periodic-activation networks
+(SIREN~\citep{sitzmann2020siren}) improve the fitting of such fields.
+
+\paragraph{Generation over latent codes.}
+DeepSDF's L2 code regularizer is the MAP estimate under a zero-mean Gaussian
+prior, so in principle one could sample $\mathbf{z}\sim\mathcal{N}(0,I)$ and
+decode. In practice the learned codes do not fill an isotropic Gaussian and
+naive sampling yields broken shapes. 3D-LDM \citep{nam2022lion3dldm} instead
+trains a \emph{latent diffusion model} over DeepSDF codes at full ShapeNet
+scale, following DDPM \citep{ho2020ddpm}; diffusion also underlies 3D generation
+via score distillation (DreamFusion \citep{poole2022dreamfusion}, our HW3).
+Alternative small-data shape generators include shape VAEs with geometric
+augmentation (GLASS~\citep{muralikrishnan2021glass}) and rigidity-regularized
+auto-decoders (ARAPReg~\citep{huang2021arapreg}).
+
+\paragraph{Our question and contribution.}
+All of the above operate at scale. We ask a controlled, resource-conscious
+question that the literature leaves open: \emph{in the small-$N$, small-$D$
+regime, does a DDPM over DeepSDF codes actually beat a plain Gaussian?} We keep
+Stage~1 fixed and vary only the Stage~2 generator, sweeping $N$ and $D$, and
+report both reconstruction and distribution-level generation metrics
+\citep{achlioptas2018latentpc}. A rigorous negative result (Gaussian $\approx$
+diffusion at small $N$) is a valid and informative outcome. All training code is
+our own (see the code README and \texttt{src/thirdparty/}).
+
+\section{Method}
+
+\subsection{Stage 1: DeepSDF auto-decoder}
+We assign each of the $N$ training shapes a latent code $\mathbf{z}_i \in
+\mathbb{R}^D$, initialized from $\mathcal{N}(0, 0.01^2)$, and share a decoder
+$f_\theta$. The decoder is an 8-layer MLP of width 512 with ReLU activations, a
+skip connection that re-injects the input $[\mathbf{z};\mathbf{x}]$ at layer~4,
+weight normalization, and a $\tanh$ on the scalar output. We initialize it with
+\emph{geometric initialization} \citep{atzmon2020sal, gropp2020igr} so that the
+network starts as an approximate sphere SDF; without this we observed the
+decoder collapsing to a spatially-constant field for some $(N,D)$ cells (no zero
+crossing, hence no extractable surface).
+
+\paragraph{Sampling supervision.} For each normalized mesh (centered, scaled
+into the unit sphere) we sample points with $90\%$ near the surface (surface
+points perturbed by two Gaussians, $\sigma\in\{0.005, 0.02\}$) and $10\%$
+uniformly in $[-1,1]^3$, and record their signed distances.
+
+\paragraph{Loss.} Following DeepSDF we minimize a clamped-$L_1$ reconstruction
+loss plus code regularization:
+\begin{equation}
+\mathcal{L} = \frac{1}{|B|}\sum_{(i,\mathbf{x})\in B}
+\bigl| \mathrm{clamp}(f_\theta(\mathbf{z}_i, \mathbf{x}), \delta)
+     - \mathrm{clamp}(s(\mathbf{x}), \delta) \bigr|
+\;+\; \lambda \, \frac{1}{|B|}\sum_i \lVert \mathbf{z}_i \rVert_2^2,
+\end{equation}
+where $s(\mathbf{x})$ is the ground-truth SDF, $\delta=0.1$, and
+$\lambda=10^{-4}$. The decoder weights $\theta$ and the codes
+$\{\mathbf{z}_i\}$ are optimized jointly with Adam.
+
+\subsection{Stage 2: generative priors over frozen codes}
+We freeze $f_\theta$ and $\{\mathbf{z}_i\}$ and fit two generators.
+
+\paragraph{Gaussian (minimal).} We fit a multivariate Gaussian
+$\mathcal{N}(\boldsymbol{\mu}, \Sigma)$ to the codes by maximum likelihood
+(full covariance with a small ridge, or a diagonal variant) and sample
+$\mathbf{z} = \boldsymbol{\mu} + L\boldsymbol{\epsilon}$ with $\Sigma=LL^\top$.
+
+\paragraph{Latent DDPM (expressive).} We train a denoising diffusion model
+directly on the $D$-dimensional codes, reusing the noise-prediction objective of
+HW3 \citep{ho2020ddpm}. With a cosine schedule
+\citep{nichol2021improvedddpm} $\{\bar\alpha_t\}$, the forward process is
+$\mathbf{z}_t = \sqrt{\bar\alpha_t}\,\mathbf{z}_0 +
+\sqrt{1-\bar\alpha_t}\,\boldsymbol{\epsilon}$, and a small MLP
+$\boldsymbol{\epsilon}_\phi(\mathbf{z}_t, t)$ (sinusoidal time embedding,
+residual blocks) is trained with
+$\mathcal{L}_{\text{DDPM}} = \mathbb{E}_{t,\boldsymbol\epsilon}
+\lVert \boldsymbol{\epsilon}_\phi(\mathbf{z}_t, t) - \boldsymbol{\epsilon}
+\rVert_2^2$. We generate by ancestral sampling from $\mathcal{N}(0,I)$.
+
+\subsection{Inference and meshing}
+To realize a sampled code we evaluate $f_\theta(\mathbf{z}, \cdot)$ on a dense
+grid over $[-1,1]^3$ and run Marching Cubes at level 0 to obtain a mesh, from
+which we sample a surface point cloud for the metrics.
+
+\section{Evaluation and Results}
+
+\subsection{Setup}
+We sweep $N \in \{10, 50, 150\}$ and $D \in \{16, 32\}$; for each cell we train
+Stage~1, then both generators. The default data are analytic parametric
+``chairs'' (a coherent shape category with an exact SDF, so results are fully
+reproducible and preprocessing-free); the identical pipeline runs on a ShapeNet
+chairs subset by pointing \texttt{data.source} at a mesh directory. Full
+hyper-parameters are in \texttt{configs/} and reproduced by
+\texttt{scripts/run\_grid.py}.
+
+\subsection{Metrics}
+\textbf{Reconstruction:} Chamfer distance and volumetric IoU between each decoded
+training code and its ground truth. \textbf{Generation}
+\citep{achlioptas2018latentpc}, computed between a set of generated shapes and a
+held-out reference set of real shapes, using Chamfer distance between surface
+point clouds: \emph{Coverage} (fraction of references matched, measures
+diversity/mode coverage), \emph{MMD} (minimum matching distance, measures
+fidelity), and \emph{1-NN accuracy} (a two-sample test; $0.5$ is ideal,
+indicating the generated and real distributions are indistinguishable).
+
+\subsection{Quantitative results}
+Table~\ref{tab:results} reports all metrics across the grid.
+Figure~\ref{fig:degradation} shows how generation quality changes with $N$ for
+each generator and $D$, and Figure~\ref{fig:recon} the reconstruction trend.
+Training curves are in Figure~\ref{fig:loss} and qualitative samples in
+Figure~\ref{fig:gallery}.
+
+\begin{table}[t]
+\centering
+\caption{Reconstruction and generation metrics across the $N\times D$ grid.
+Recon-CD and MMD are lower-is-better; IoU and Coverage higher-is-better; 1-NN
+accuracy is best near $0.5$.}
+\label{tab:results}
+\input{figures/results_table.tex}
+\end{table}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\textwidth]{degradation_generation.png}
+\caption{Generation metrics vs.\ number of training shapes $N$, per generator
+and latent dimension $D$. The dashed line marks the ideal 1-NN accuracy of
+$0.5$.}
+\label{fig:degradation}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\textwidth]{degradation_reconstruction.png}
+\caption{Reconstruction Chamfer distance and IoU vs.\ $N$ for each latent
+dimension $D$.}
+\label{fig:recon}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\textwidth]{loss_curves.png}
+\caption{Stage-1 clamped-$L_1$ reconstruction loss and Stage-2 DDPM
+noise-prediction loss for each grid cell.}
+\label{fig:loss}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\textwidth]{gallery.png}
+\caption{Qualitative results for the largest cell: decoded reconstructions of
+training codes (top) and shapes decoded from Gaussian prior samples (bottom).}
+\label{fig:gallery}
+\end{figure}
+
+\subsection{Discussion}
+The results support our hypothesis: in the small-data regime the \emph{marginal}
+value of diffusion over a Gaussian is small, and often negative. Reconstruction
+is strong and roughly flat across the grid (Chamfer $\approx 1.0$--$1.5\times
+10^{-3}$, IoU $0.68$--$0.80$; Figure~\ref{fig:recon}), confirming that Stage~1
+has enough capacity at this scale, so differences between generators reflect the
+Stage~2 prior rather than the decoder.
+
+At $N=10$ and $N=50$ the Gaussian matches or beats the DDPM on the two-sample
+1-NN test (closer to the ideal $0.5$): at $N{=}50,\,D{=}16$ the Gaussian scores
+$0.625$ versus the DDPM's $0.750$, and at $N{=}50,\,D{=}32$ it scores $0.662$
+versus $0.875$; the Gaussian also attains equal or higher Coverage in every
+small-$N$ cell. Intuitively, with only a handful of codes the empirical latent
+distribution is nearly Gaussian and the DDPM has little structure to exploit,
+while its extra parameters are harder to fit from few examples.
+
+The crossover appears only at the largest $N$: at $N{=}150,\,D{=}16$ the DDPM
+finally edges the Gaussian on 1-NN accuracy ($0.637$ vs.\ $0.688$) and MMD
+($2.09$ vs.\ $2.19\times10^{-3}$). The 1-NN curve for the DDPM at $D{=}16$
+(Figure~\ref{fig:degradation}, right) decreases monotonically in $N$, whereas
+the Gaussian is essentially flat---exactly the behavior expected if diffusion
+needs data to express a non-Gaussian code distribution. The practical takeaway
+for a Colab-scale budget is that a Gaussian prior is the better default until the
+code set is large enough (here, $N\gtrsim 150$ at the smaller $D$) to reward the
+diffusion model. Finally, an implementation finding independent of the
+generator: geometric initialization was necessary for stable auto-decoder
+training---plain initialization collapsed some $(N,D)$ cells to a
+spatially-constant field with no extractable surface.
+
+\section{Conclusion}
+We presented a controlled comparison of a Gaussian prior and a latent DDPM over
+frozen DeepSDF codes in the small-data, small-capacity regime. Rather than
+pursuing state of the art, we asked when diffusion is worth its added
+complexity, and found that at very small $N$ a simple Gaussian is a strong,
+often statistically indistinguishable baseline---a useful negative result for
+practitioners working under Colab-scale budgets. Limitations include the use of
+a synthetic shape category for the primary sweep (the pipeline supports
+ShapeNet meshes) and modest decoder capacity; future work could scale $N$ and
+$D$ further and add flow- or VAE-based priors as intermediate points on the
+minimal-to-expressive spectrum.
+
+\bibliographystyle{plainnat}
+\bibliography{references}
+
+\appendix
+\section{Original Proposal}
+The approved project proposal is reproduced below.
+\input{proposal_appendix.tex}
+
+\end{document}

@@ -1,0 +1,15 @@
+# Core deep learning
+torch>=2.1
+numpy>=1.24
+
+# Geometry / meshing / SDF
+trimesh>=4.0
+charset-normalizer>=3.0  # required by trimesh for some OBJ/MTL loads
+rtree>=1.0           # spatial index backend for trimesh proximity (mesh->SDF)
+scikit-image>=0.21   # marching cubes
+scipy>=1.10          # KDTree for Chamfer / metrics
+
+# Config, plotting, progress
+pyyaml>=6.0
+matplotlib>=3.7
+tqdm>=4.65

@@ -1,0 +1,62 @@
+# Full ShapeNet chairs run (after downloading synset 03001627).
+# Set mesh_dir to your local ShapeNetCore.v2 chairs folder.
+seed: 0
+device: cuda
+
+data:
+  source: mesh_dir
+  mesh_dir: /path/to/ShapeNetCore.v2/03001627
+  num_points: 8000
+  surface_ratio: 0.9
+  sigmas: [0.005, 0.02]
+  num_surface_points: 2048
+  mesh_resolution: 40
+
+decoder:
+  hidden_dim: 256
+  num_layers: 8
+  skip_in: [4]
+  dropout_prob: 0.0
+  use_weight_norm: true
+  use_tanh: true
+  geometric_init: true
+  init_radius: 0.5
+
+stage1:
+  num_iters: 1500
+  shapes_per_batch: 16
+  points_per_shape: 1024
+  lr_decoder: 1.0e-3
+  lr_codes: 1.0e-3
+  clamp_delta: 0.1
+  code_init_std: 0.01
+  code_reg_lambda: 1.0e-4
+
+gaussian:
+  covariance: full
+  reg: 1.0e-5
+
+ddpm:
+  num_timesteps: 200
+  beta_start: 1.0e-4
+  beta_end: 0.02
+  schedule: cosine
+  hidden_dim: 256
+  num_layers: 4
+  time_embed_dim: 64
+  lr: 1.0e-3
+  num_iters: 1500
+  batch_size: 64
+
+eval:
+  num_generated: 40
+  num_reference: 40
+  surface_points: 2048
+  recon_resolution: 48
+  iou_resolution: 32
+  max_recon_shapes: 12
+
+grid:
+  N: [10, 50, 150]
+  D: [16, 32]
+  generators: [gaussian, ddpm]

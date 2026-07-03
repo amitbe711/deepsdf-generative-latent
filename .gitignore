@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+venv/
+.venv/
+
+# Training outputs (regenerate with scripts/run_grid.py)
+code/outputs/
+code/figures_smoke/
+code/*.log
+
+# Optional local ShapeNet downloads
+code/data/shapenet_hf/
+code/data/shapenet_chairs_test/**/images/
+code/data/shapenet_chairs_test/**/__MACOSX/
+
+# OS / editor
+.DS_Store
+.idea/
+.ipynb_checkpoints/

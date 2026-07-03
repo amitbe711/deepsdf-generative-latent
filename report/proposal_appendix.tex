@@ -1,0 +1,38 @@
+% Approved proposal, reproduced verbatim (see Final_Project/proposal.md).
+\paragraph{Title.} Generative Latent Models for DeepSDF: Gaussian vs Diffusion
+in the Small-Data Regime. \emph{Author:} Amit Benbenishti.
+
+\paragraph{Problem definition.} DeepSDF learns one latent code per shape, but
+does not learn a distribution over codes---random codes decode to invalid
+shapes. I train a generative model over the latent space (not over shapes
+directly) and study which simple prior works when data and capacity are limited.
+
+\paragraph{Approach.} \emph{Stage 1:} train a DeepSDF auto-decoder on a shape
+collection; collect latent codes $\{z_i\}$. \emph{Stage 2 (frozen decoder):} fit
+two generators on $\{z_i\}$---(1) Gaussian (mean + covariance), (2) DDPM
+diffusion over $z$ (same noise-prediction setup as HW3, applied to vectors).
+\emph{Inference:} sample $z$ from a generator $\rightarrow$ decode with
+$f(z, x) \rightarrow$ SDF $\rightarrow$ mesh. Sweep $N \in \{10, 50, 150\} \times
+D \in \{16, 32\}$ and compare generators. Goal is not SOTA---it is to identify
+when diffusion is worth the extra complexity over a Gaussian. All training code
+is my own.
+
+\paragraph{Motivation.} 3D-LDM uses latent diffusion over DeepSDF codes at full
+ShapeNet scale; naive Gaussian sampling from the same latent space often fails.
+I study the minimal-resource regime (small $N$, small $D$, Colab) where that
+tradeoff is unknown.
+
+\paragraph{Validation.} \emph{Data:} ShapeNet subset ($\sim$50--200 meshes) or
+synthetic shapes + \texttt{stanford\_bunny.obj}. \emph{Metrics:} Chamfer + IoU
+(reconstruction); Coverage, MMD, 1-NN accuracy (generation); qualitative samples
+and interpolations. \emph{Mid-point checks:} (1) overfit one shape, (2) train
+DeepSDF on $\sim$10 shapes and extract codes, (3) sample one mesh from Gaussian
+and one from diffusion. \emph{Final:} full $N\times D$ grid + generator
+comparison + degradation curves, including negative results (e.g., Gaussian
+matches diffusion at small $N$).
+
+\paragraph{Related work.} DeepSDF~\citep{park2019deepsdf}---auto-decoder and
+latent codes (Stage 1). 3D-LDM~\citep{nam2022lion3dldm}---latent diffusion over
+DeepSDF codes at scale; does not study small $N/D$ or Gaussian vs diffusion
+explicitly. DreamFusion / DDPM~\citep{poole2022dreamfusion, ho2020ddpm}---
+diffusion training (HW3 connection).

@@ -1,0 +1,1057 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Architecture Deep Dive — Generative Latent Models for DeepSDF</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+<script>window.MathJax = {tex: {inlineMath: [['\\(','\\)']], displayMath: [['\\[','\\]']]}};</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/3.2.2/es5/tex-mml-chtml.min.js"></script>
+<style>
+  :root{
+    --bg:#0f1117; --panel:#161a24; --panel-2:#1c212e; --border:#2a3040;
+    --text:#e7ebf3; --muted:#9aa4b8; --accent:#6ea8fe; --accent-2:#7ee0c3;
+    --warn:#f6c177; --danger:#f28b82; --code-bg:#11141c;
+    --stage1:#6ea8fe; --stage2:#7ee0c3; --data:#f6c177; --infer:#c9a4ff;
+    --maxw:920px;
+  }
+  *{box-sizing:border-box;}
+  html{scroll-behavior:smooth;}
+  body{
+    margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg); color:var(--text); line-height:1.65; font-size:16px;
+  }
+  a{color:var(--accent); text-decoration:none;}
+  a:hover{text-decoration:underline;}
+  code{font-family:"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace; font-size:0.88em;}
+  p code, li code, td code{background:var(--panel-2); padding:0.12em 0.4em; border-radius:4px; color:var(--accent-2); border:1px solid var(--border);}
+  pre{background:var(--code-bg); border:1px solid var(--border); border-radius:10px; padding:14px 16px; overflow-x:auto; margin:14px 0;}
+  pre code{background:none; border:none; padding:0; color:inherit; font-size:0.86em; line-height:1.55;}
+
+  /* Layout */
+  .layout{display:flex; min-height:100vh;}
+  nav.sidebar{
+    width:290px; flex-shrink:0; background:var(--panel); border-right:1px solid var(--border);
+    position:sticky; top:0; height:100vh; overflow-y:auto; padding:22px 16px 60px;
+  }
+  nav.sidebar h1{font-size:15px; color:var(--muted); text-transform:uppercase; letter-spacing:0.06em; margin:0 6px 14px;}
+  nav.sidebar .brand{font-size:17px; font-weight:700; color:var(--text); margin-bottom:2px; padding:0 6px;}
+  nav.sidebar .subbrand{font-size:12.5px; color:var(--muted); padding:0 6px; margin-bottom:20px; display:block;}
+  nav.sidebar ol{list-style:none; margin:0; padding:0;}
+  nav.sidebar > ol > li{margin-bottom:2px;}
+  nav.sidebar a.navlink{
+    display:block; padding:7px 10px; border-radius:7px; color:var(--muted); font-size:13.5px;
+  }
+  nav.sidebar a.navlink:hover{background:var(--panel-2); color:var(--text); text-decoration:none;}
+  nav.sidebar li.top > a.navlink{color:var(--text); font-weight:600; margin-top:10px;}
+  nav.sidebar ol.sub{padding-left:14px; border-left:1px solid var(--border); margin-left:10px;}
+
+  main{flex:1; min-width:0; padding:48px 40px 120px; display:flex; justify-content:center;}
+  .content{max-width:var(--maxw); width:100%;}
+
+  header.hero{margin-bottom:46px;}
+  header.hero .kicker{color:var(--accent-2); font-size:13px; text-transform:uppercase; letter-spacing:0.12em; font-weight:700;}
+  header.hero h1{font-size:34px; line-height:1.25; margin:10px 0 14px;}
+  header.hero p.lede{color:var(--muted); font-size:16.5px; max-width:760px;}
+  header.hero .meta{margin-top:18px; display:flex; gap:10px; flex-wrap:wrap;}
+  .pill{background:var(--panel-2); border:1px solid var(--border); border-radius:999px; padding:4px 12px; font-size:12.5px; color:var(--muted);}
+
+  section.block{margin:64px 0; scroll-margin-top:24px;}
+  section.sub{margin:34px 0; scroll-margin-top:24px;}
+  h2.h-part{
+    font-size:24px; margin:0 0 6px; display:flex; align-items:center; gap:10px; border-bottom:1px solid var(--border); padding-bottom:14px;
+  }
+  h2.h-part .tag{font-size:12px; font-weight:700; padding:3px 9px; border-radius:6px; letter-spacing:0.03em;}
+  .tag.data{background:rgba(246,193,119,0.15); color:var(--data); border:1px solid rgba(246,193,119,0.35);}
+  .tag.stage1{background:rgba(110,168,254,0.15); color:var(--stage1); border:1px solid rgba(110,168,254,0.35);}
+  .tag.stage2{background:rgba(126,224,195,0.15); color:var(--stage2); border:1px solid rgba(126,224,195,0.35);}
+  .tag.infer{background:rgba(201,164,255,0.15); color:var(--infer); border:1px solid rgba(201,164,255,0.35);}
+  .tag.eng{background:rgba(154,164,184,0.15); color:var(--muted); border:1px solid var(--border);}
+  h3.h-sub{font-size:19px; margin:30px 0 10px; color:var(--text);}
+  h4.h-subsub{font-size:15.5px; margin:22px 0 8px; color:var(--accent);}
+  p{margin:12px 0;}
+  ul,ol{padding-left:22px;}
+  li{margin:6px 0;}
+
+  .filecard{
+    display:flex; align-items:center; gap:10px; background:var(--panel-2); border:1px solid var(--border);
+    border-radius:8px; padding:8px 12px; font-size:13px; margin:10px 0; color:var(--muted);
+  }
+  .filecard code{color:var(--accent-2); background:none; border:none; padding:0; font-size:13px;}
+
+  .callout{border-radius:10px; padding:14px 16px; margin:18px 0; border:1px solid var(--border); font-size:14.5px;}
+  .callout.note{background:rgba(110,168,254,0.08); border-color:rgba(110,168,254,0.3);}
+  .callout.why{background:rgba(126,224,195,0.08); border-color:rgba(126,224,195,0.3);}
+  .callout.warn{background:rgba(246,193,119,0.08); border-color:rgba(246,193,119,0.3);}
+  .callout b{color:var(--text);}
+  .callout .lbl{font-weight:700; text-transform:uppercase; font-size:11px; letter-spacing:0.08em; display:block; margin-bottom:6px;}
+  .callout.note .lbl{color:var(--accent);}
+  .callout.why .lbl{color:var(--accent-2);}
+  .callout.warn .lbl{color:var(--warn);}
+
+  table{border-collapse:collapse; width:100%; margin:16px 0; font-size:14px;}
+  th,td{border:1px solid var(--border); padding:8px 10px; text-align:left;}
+  th{background:var(--panel-2); color:var(--text); font-weight:600;}
+  td{color:var(--muted);}
+  tr:hover td{color:var(--text);}
+
+  .flow{background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:26px; margin:22px 0; overflow-x:auto;}
+  .flow-row{display:flex; align-items:center; gap:0; flex-wrap:nowrap; min-width:max-content;}
+  .flow-box{
+    background:var(--panel-2); border:1px solid var(--border); border-radius:10px; padding:12px 16px;
+    text-align:center; font-size:13px; min-width:130px;
+  }
+  .flow-box .t{font-weight:700; color:var(--text); font-size:13.5px;}
+  .flow-box .s{color:var(--muted); font-size:11.5px; display:block; margin-top:3px;}
+  .flow-arrow{color:var(--muted); font-size:20px; padding:0 10px; flex-shrink:0;}
+  .flow-split{display:flex; flex-direction:column; gap:10px;}
+  .flow-box.stage1{border-color:rgba(110,168,254,0.5);}
+  .flow-box.stage2a{border-color:rgba(126,224,195,0.5);}
+  .flow-box.stage2b{border-color:rgba(126,224,195,0.5);}
+  .flow-box.data{border-color:rgba(246,193,119,0.5);}
+  .flow-box.infer{border-color:rgba(201,164,255,0.5);}
+
+  .tree{background:var(--code-bg); border:1px solid var(--border); border-radius:10px; padding:16px 20px; font-family:Consolas,monospace; font-size:13px; color:var(--muted); overflow-x:auto;}
+  .tree .d{color:var(--accent);}
+  .tree .f{color:var(--text);}
+  .tree .c{color:#6b7280;}
+
+  .kv{display:grid; grid-template-columns:170px 1fr; gap:6px 14px; font-size:13.5px; margin:14px 0;}
+  .kv div.k{color:var(--muted);}
+  .kv div.v{color:var(--text);}
+
+  .step-list{counter-reset:step;}
+  .step-list > li{list-style:none; position:relative; padding-left:8px; margin:16px 0;}
+  .step-list > li::before{
+    counter-increment:step; content:counter(step); position:absolute; left:-30px; top:0;
+    width:22px; height:22px; border-radius:50%; background:var(--panel-2); border:1px solid var(--border);
+    display:flex; align-items:center; justify-content:center; font-size:12px; color:var(--accent); font-weight:700;
+  }
+  .step-list{padding-left:30px;}
+
+  .top-link{position:fixed; bottom:26px; right:26px; background:var(--panel-2); border:1px solid var(--border); border-radius:50%; width:44px; height:44px; display:flex; align-items:center; justify-content:center; color:var(--text); font-size:18px; opacity:0.85;}
+  .top-link:hover{opacity:1; text-decoration:none;}
+
+  .badge-io{display:inline-block; font-size:11.5px; padding:2px 8px; border-radius:6px; background:var(--panel-2); border:1px solid var(--border); color:var(--muted); margin-left:6px;}
+
+  hr.sep{border:none; border-top:1px solid var(--border); margin:40px 0;}
+
+  footer{margin-top:80px; padding-top:24px; border-top:1px solid var(--border); color:var(--muted); font-size:13px;}
+
+  @media (max-width: 900px){
+    nav.sidebar{display:none;}
+    main{padding:30px 18px;}
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+
+<nav class="sidebar">
+  <div class="brand">DeepSDF × Gaussian vs. DDPM</div>
+  <span class="subbrand">Architecture deep dive</span>
+  <ol>
+    <li><a class="navlink" href="#overview">0. Overview &amp; big picture</a></li>
+    <li><a class="navlink" href="#repo-map">Repository map</a></li>
+
+    <li class="top"><a class="navlink" href="#part-data">Part 1 · Data pipeline</a>
+      <ol class="sub">
+        <li><a class="navlink" href="#why-sdf">1.1 Why SDFs, why synthetic</a></li>
+        <li><a class="navlink" href="#synthetic">1.2 Parametric chairs</a></li>
+        <li><a class="navlink" href="#normalize">1.3 Unit-sphere normalization</a></li>
+        <li><a class="navlink" href="#sdf-sampling">1.4 SDF sampling strategy</a></li>
+        <li><a class="navlink" href="#dataset">1.5 ShapeSDFDataset</a></li>
+      </ol>
+    </li>
+
+    <li class="top"><a class="navlink" href="#part-stage1">Part 2 · Stage 1: DeepSDF</a>
+      <ol class="sub">
+        <li><a class="navlink" href="#autodecoder">2.1 Auto-decoder, not encoder</a></li>
+        <li><a class="navlink" href="#latent-codes">2.2 Latent codes module</a></li>
+        <li><a class="navlink" href="#decoder-arch">2.3 Decoder architecture</a></li>
+        <li><a class="navlink" href="#geo-init">2.4 Geometric initialization</a></li>
+        <li><a class="navlink" href="#stage1-loss">2.5 Loss &amp; training loop</a></li>
+      </ol>
+    </li>
+
+    <li class="top"><a class="navlink" href="#part-stage2">Part 3 · Stage 2: generators</a>
+      <ol class="sub">
+        <li><a class="navlink" href="#why-prior">3.1 Why not just N(0, I)</a></li>
+        <li><a class="navlink" href="#gaussian-prior">3.2 Generator A: Gaussian</a></li>
+        <li><a class="navlink" href="#ddpm">3.3 Generator B: Latent DDPM</a></li>
+      </ol>
+    </li>
+
+    <li class="top"><a class="navlink" href="#part-inference">Part 4 · Mesh extraction</a>
+      <ol class="sub">
+        <li><a class="navlink" href="#marching">4.1 Marching Cubes wrapper</a></li>
+        <li><a class="navlink" href="#sample-py">4.2 sample.py</a></li>
+      </ol>
+    </li>
+
+    <li class="top"><a class="navlink" href="#part-metrics">Part 5 · Metrics</a>
+      <ol class="sub">
+        <li><a class="navlink" href="#recon-metrics">5.1 Reconstruction</a></li>
+        <li><a class="navlink" href="#gen-metrics">5.2 Generation</a></li>
+      </ol>
+    </li>
+
+    <li class="top"><a class="navlink" href="#part-orchestration">Part 6 · Orchestration</a>
+      <ol class="sub">
+        <li><a class="navlink" href="#config">6.1 Config system</a></li>
+        <li><a class="navlink" href="#run-grid">6.2 run_grid.py walkthrough</a></li>
+        <li><a class="navlink" href="#make-figures">6.3 make_figures.py</a></li>
+      </ol>
+    </li>
+
+    <li class="top"><a class="navlink" href="#part-engineering">Part 7 · Engineering</a>
+      <ol class="sub">
+        <li><a class="navlink" href="#seed-io">7.1 Reproducibility &amp; checkpoints</a></li>
+        <li><a class="navlink" href="#prepare-data">7.2 prepare_data.py</a></li>
+        <li><a class="navlink" href="#thirdparty">7.3 Authorship accounting</a></li>
+      </ol>
+    </li>
+
+    <li class="top"><a class="navlink" href="#part-tests">Part 8 · Tests</a></li>
+    <li class="top"><a class="navlink" href="#part-results">Part 9 · Results walkthrough</a></li>
+    <li class="top"><a class="navlink" href="#part-lit">Part 10 · Connections to papers</a></li>
+    <li class="top"><a class="navlink" href="#glossary">Glossary</a></li>
+  </ol>
+</nav>
+
+<main>
+<div class="content">
+
+<header class="hero" id="overview">
+  <div class="kicker">Final Project — Deep Learning for 3D Computer Vision</div>
+  <h1>Generative Latent Models for DeepSDF:<br>Gaussian vs. Diffusion in the Small-Data Regime</h1>
+  <p class="lede">
+    This page is a from-scratch, part-by-part walkthrough of the entire codebase: every file,
+    every method, and the reasoning behind each design choice. It is written so you can trace
+    a single latent code all the way from "a directory of chairs" to "a trained generator that
+    can hallucinate new chairs," and understand <em>why</em> each piece exists, not just what it does.
+  </p>
+  <div class="meta">
+    <span class="pill">Author: Amit Benbenishti</span>
+    <span class="pill">Stage 1: DeepSDF auto-decoder</span>
+    <span class="pill">Stage 2: Gaussian vs. DDPM</span>
+    <span class="pill">Grid: N ∈ {10,50,150} × D ∈ {16,32}</span>
+  </div>
+</header>
+
+<section class="block">
+  <h2 class="h-part">The one-sentence idea</h2>
+  <p>
+    <b>DeepSDF</b> can represent a shape as a latent vector <code>z</code> that a neural network
+    turns into a 3D surface — but it has no idea which vectors <code>z</code> are "valid shapes"
+    and which are garbage, because it never learns a <em>distribution</em> over <code>z</code>.
+    This project bolts a second, much smaller model on top of a frozen DeepSDF decoder whose
+    only job is to learn that distribution, so you can sample a fresh <code>z</code> and get a
+    plausible new shape. Two candidate "distribution learners" (generators) are compared —
+    a plain multivariate <b>Gaussian</b> (cheap, closed-form) and a <b>DDPM</b> (diffusion model,
+    expensive, expressive) — across a grid of dataset sizes and latent dimensions, to find out
+    when the expensive one is actually worth it.
+  </p>
+
+  <h3 class="h-sub">The big picture pipeline</h3>
+  <p>Every one of the four colors below maps to one "Part" of this document.</p>
+
+  <div class="flow">
+    <div class="flow-row">
+      <div class="flow-box data"><span class="t">Meshes / synthetic chairs</span><span class="s">Part 1 — Data</span></div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-box data"><span class="t">SDF point samples</span><span class="s">points [P,3], sdf [P]</span></div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-box stage1"><span class="t">Stage 1: DeepSDF<br>auto-decoder</span><span class="s">f_θ(z, x) + codes {z_i}</span></div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-box stage1"><span class="t">Frozen decoder<br>+ frozen codes</span><span class="s">Part 2</span></div>
+    </div>
+  </div>
+  <div class="flow">
+    <div class="flow-row">
+      <div class="flow-box stage2a"><span class="t">Generator A: Gaussian</span><span class="s">fit μ, Σ to {z_i}</span></div>
+      <div class="flow-arrow">＋</div>
+      <div class="flow-box stage2b"><span class="t">Generator B: Latent DDPM</span><span class="s">train ε_φ(z_t, t) on {z_i}</span></div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-box infer"><span class="t">sample z</span><span class="s">Part 3</span></div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-box infer"><span class="t">f_θ(z, grid)</span><span class="s">SDF volume</span></div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-box infer"><span class="t">Marching Cubes</span><span class="s">mesh — Part 4</span></div>
+    </div>
+  </div>
+
+  <div class="callout note">
+    <span class="lbl">Key mental model</span>
+    There are exactly <b>two training phases</b> and they never touch each other's parameters:
+    Stage 1 learns <i>"how to turn a code into a shape"</i> (the decoder), Stage 2 learns
+    <i>"which codes are legal"</i> (the generator). Freezing the decoder before Stage 2 is what
+    makes the comparison between Gaussian and DDPM fair — both generators are graded on the
+    exact same decoder and the exact same set of ground-truth codes.
+  </div>
+</section>
+
+<section class="block" id="repo-map">
+  <h2 class="h-part">Repository map</h2>
+  <p>Everything lives under <code>Final_Project/code/</code>. This is the whole tree, annotated:</p>
+  <div class="tree">
+<span class="d">configs/</span>            <span class="c"># YAML experiment configs</span>
+  <span class="f">base.yaml</span>         <span class="c"># full N×D grid, meant for a Colab GPU</span>
+  <span class="f">smoke.yaml</span>        <span class="c"># tiny/fast CPU config, identical code path</span>
+<span class="d">src/</span>
+  <span class="d">data/</span>             <span class="c"># meshes/synthetic shapes -> SDF training tensors</span>
+    <span class="f">synthetic.py</span>    <span class="c"># analytic parametric "chair" family + exact SDF</span>
+    <span class="f">normalize.py</span>    <span class="c"># center + scale a mesh into the unit sphere</span>
+    <span class="f">sdf_sampling.py</span> <span class="c"># surface + uniform SDF point sampling</span>
+    <span class="f">dataset.py</span>      <span class="c"># ShapeSDFDataset: batching for Stage 1</span>
+  <span class="d">models/</span>           <span class="c"># pure nn.Module definitions, no training logic</span>
+    <span class="f">decoder.py</span>      <span class="c"># DeepSDFDecoder: the shared MLP f_θ(z,x)</span>
+    <span class="f">latent_codes.py</span> <span class="c"># LatentCodes: one trainable vector per shape</span>
+    <span class="f">gaussian_prior.py</span> <span class="c"># GaussianPrior: fit + sample</span>
+    <span class="f">ddpm.py</span>          <span class="c"># LatentDDPM + MLPDenoiser: forward/reverse diffusion</span>
+  <span class="d">train/</span>            <span class="c"># training loops (uses models/ + data/)</span>
+    <span class="f">stage1_train.py</span> <span class="c"># joint decoder+code optimization</span>
+    <span class="f">stage2_gaussian.py</span> <span class="c"># fit_gaussian(): thin wrapper</span>
+    <span class="f">stage2_ddpm.py</span>  <span class="c"># train_ddpm(): the DDPM training loop</span>
+  <span class="d">metrics/</span>
+    <span class="f">reconstruction.py</span> <span class="c"># Chamfer distance, volumetric IoU</span>
+    <span class="f">generation.py</span>   <span class="c"># Coverage, MMD, 1-NN accuracy (Achlioptas et al.)</span>
+  <span class="f">marching.py</span>       <span class="c"># SDF grid -> mesh (Marching Cubes)</span>
+  <span class="f">sample.py</span>         <span class="c"># z -> SDF volume -> mesh / point cloud</span>
+  <span class="d">utils/</span>
+    <span class="f">config.py</span>       <span class="c"># AttrDict YAML loader</span>
+    <span class="f">io.py</span>           <span class="c"># checkpoint save/load</span>
+    <span class="f">seed.py</span>         <span class="c"># seed_everything()</span>
+  <span class="d">thirdparty/</span>       <span class="c"># deliberately empty; README documents authorship</span>
+<span class="d">scripts/</span>
+  <span class="f">run_grid.py</span>       <span class="c"># orchestrates the whole N×D experiment grid</span>
+  <span class="f">make_figures.py</span>   <span class="c"># turns outputs/ into tables + PNG figures</span>
+  <span class="f">prepare_data.py</span>   <span class="c"># optional: inspect/cache a real mesh directory</span>
+<span class="d">tests/</span>              <span class="c"># the project's own "mid-point checks"</span>
+<span class="d">notebooks/colab_driver.ipynb</span> <span class="c"># Colab entry point</span>
+  </div>
+  <div class="callout why">
+    <span class="lbl">Why this layout</span>
+    <code>models/</code> only defines architectures (no I/O, no optimizers) — they're pure,
+    testable, reusable <code>nn.Module</code>s. <code>train/</code> owns the optimization loops.
+    <code>data/</code> knows nothing about the decoder. This separation is why the same
+    <code>models/decoder.py</code> file is reused unchanged for the synthetic <i>and</i> the
+    ShapeNet-mesh data paths, and why swapping the Stage-2 generator never touches Stage-1 code.
+  </div>
+</section>
+
+<!-- ==================== PART 1: DATA ==================== -->
+<section class="block" id="part-data">
+  <h2 class="h-part"><span class="tag data">PART 1</span> Data pipeline — from shapes to SDF samples</h2>
+  <p>
+    DeepSDF does not train on meshes directly. It trains on a cloud of
+    <code>(point, signed-distance)</code> pairs. All of Part 1 exists to produce exactly that:
+    a tensor of 3D points and, for each one, the true signed distance to the shape's surface.
+  </p>
+
+  <section class="sub" id="why-sdf">
+    <h3 class="h-sub">1.1 Why signed distance fields, and why a synthetic shape family</h3>
+    <p>
+      A <b>signed distance function (SDF)</b> represents a surface implicitly as the zero level
+      set of a scalar field \( f:\mathbb{R}^3 \to \mathbb{R} \): \(f(\mathbf{x})\) is the distance
+      from point \(\mathbf{x}\) to the nearest surface point, <b>negative inside</b> the shape and
+      <b>positive outside</b>. Compared to voxels or point clouds, an SDF is resolution-free (you
+      can query it at arbitrary precision) and differentiable, which is exactly what lets a single
+      neural network stand in for the whole field.
+    </p>
+    <p>
+      The project supports two data sources, controlled by <code>data.source</code> in the config:
+    </p>
+    <table>
+      <tr><th>Source</th><th>What it is</th><th>Ground-truth SDF</th><th>When to use</th></tr>
+      <tr><td><code>synthetic</code> (default)</td><td>Analytic parametric "chairs" generated in code</td><td>Exact, closed-form — no mesh needed</td><td>Fast, fully reproducible, no preprocessing; used for the main N×D sweep</td></tr>
+      <tr><td><code>mesh_dir</code></td><td>A directory of real meshes (e.g. a ShapeNet chairs subset)</td><td>Estimated via nearest-surface-point queries</td><td>Validates the pipeline transfers to real, non-analytic geometry</td></tr>
+    </table>
+    <div class="callout why">
+      <span class="lbl">Why synthetic shapes exist at all</span>
+      Real mesh datasets (ShapeNet) need licensing, downloading, and mesh cleanup (many meshes
+      aren't watertight, which breaks signed-distance queries). The parametric chair family
+      sidesteps all of that: it is a coherent shape <i>category</i> (so generation metrics like
+      Coverage/MMD are meaningful — there is a real notion of "a valid chair"), it has an exact
+      analytic SDF (no sampling error), and it can generate hundreds of variants deterministically
+      from a seed. The exact same downstream code (Stage 1, Stage 2, metrics) is oblivious to
+      which source produced the data.
+    </div>
+  </section>
+
+  <section class="sub" id="synthetic">
+    <h3 class="h-sub">1.2 The parametric chair family <span class="badge-io">src/data/synthetic.py</span></h3>
+    <p>
+      Every chair is a union of axis-aligned boxes: one seat slab, one backrest, and four legs.
+      A <b>box SDF</b> is computed exactly with the classic formula (used everywhere in
+      signed-distance-field graphics):
+    </p>
+    <pre><code class="language-python">def _box_sdf(points, center, half):
+    q = np.abs(points - center) - half
+    outside = np.linalg.norm(np.maximum(q, 0.0), axis=-1)
+    inside = np.minimum(np.max(q, axis=-1), 0.0)
+    return outside + inside</code></pre>
+    <p>
+      Intuitively: <code>q</code> measures, per axis, how far the point sticks out past the box's
+      half-extent. If the point is outside on any axis, <code>outside</code> is the Euclidean
+      distance of that overshoot. If the point is fully inside, <code>outside</code> is zero and
+      <code>inside</code> becomes the (negative) distance to the nearest face — giving a proper
+      negative-inside SDF.
+    </p>
+    <p>
+      A whole chair is the <b>union</b> of several boxes, and the SDF of a union of shapes is the
+      pointwise <b>minimum</b> of their individual SDFs (a point is "inside the union" if it's
+      inside <em>any</em> primitive):
+    </p>
+    <pre><code class="language-python">class AnalyticShape:
+    def sdf(self, points):
+        dists = [_box_sdf(points, c, h) for c, h in self.boxes]
+        return np.min(np.stack(dists, axis=0), axis=0)</code></pre>
+    <p>
+      <code>ParametricChair</code> builds the 6 boxes (seat, backrest, 4 legs) from a
+      <code>ChairParams</code> dataclass (seat width/depth/height/thickness, backrest height, leg
+      thickness). <code>make_synthetic_collection(num_shapes, seed)</code> draws these parameters
+      uniformly at random from a reasonable range and returns a reproducible list of chairs — the
+      entire "dataset" is just a seed plus this code.
+    </p>
+    <p>
+      When a mesh is actually needed (for surface sampling or ground-truth comparison),
+      <code>to_mesh()</code> calls the same Marching-Cubes utility used everywhere else in the
+      project (<a href="#marching">Part 4.1</a>) on the analytic <code>sdf()</code> function.
+    </p>
+  </section>
+
+  <section class="sub" id="normalize">
+    <h3 class="h-sub">1.3 Normalizing meshes into the unit sphere <span class="badge-io">src/data/normalize.py</span></h3>
+    <p>
+      DeepSDF assumes every shape's surface lives inside the unit sphere, with a small safety
+      margin so that near-surface point perturbations never leave the <code>[-1,1]³</code> cube
+      used at inference. <code>normalize_mesh_to_unit_sphere</code> does this in two steps:
+    </p>
+    <ol>
+      <li>Translate the mesh so its bounding-box center sits at the origin.</li>
+      <li>Compute the farthest vertex from the origin (<code>radius</code>) and uniformly scale so that
+        <code>radius</code> maps to <code>1 / buffer</code> (buffer ≈ 1.03, matching DeepSDF's convention),
+        leaving ~3% headroom.</li>
+    </ol>
+    <p>This only applies to the <code>mesh_dir</code> path — analytic chairs are already built inside the unit cube by construction.</p>
+  </section>
+
+  <section class="sub" id="sdf-sampling">
+    <h3 class="h-sub">1.4 SDF sampling strategy <span class="badge-io">src/data/sdf_sampling.py</span></h3>
+    <p>
+      A network trained on points sampled uniformly at random inside the cube would waste almost
+      all of its capacity learning the "far field", where the SDF is smooth and uninteresting.
+      DeepSDF's Sec. 3 sampling recipe (implemented here) concentrates samples where the surface
+      actually is:
+    </p>
+    <div class="kv">
+      <div class="k">90% of points</div><div class="v">near the surface — sample a surface point, then perturb it with Gaussian noise</div>
+      <div class="k">→ half of those</div><div class="v">perturbed with a small σ = 0.005 (fine detail near the surface)</div>
+      <div class="k">→ other half</div><div class="v">perturbed with a larger σ = 0.02 (coarser structure slightly further out)</div>
+      <div class="k">10% of points</div><div class="v">drawn uniformly in <code>[-1,1]³</code> — anchors the far field so the SDF doesn't blow up away from the surface</div>
+    </div>
+    <p>For real meshes, the true signed distance at arbitrary query points is computed via trimesh's proximity query, with the sign flipped to match the DeepSDF convention (negative inside):</p>
+    <pre><code class="language-python">def _signed_distance(mesh, points):
+    query = trimesh.proximity.ProximityQuery(mesh)
+    sd = query.signed_distance(points)  # trimesh: positive inside
+    return -np.asarray(sd, dtype=np.float32)             # flip to DeepSDF convention</code></pre>
+    <p>For analytic chairs, the SDF is evaluated directly with the closed-form <code>shape.sdf(points)</code> — no proximity query needed, no sampling error.</p>
+  </section>
+
+  <section class="sub" id="dataset">
+    <h3 class="h-sub">1.5 ShapeSDFDataset — turning shapes into training batches <span class="badge-io">src/data/dataset.py</span></h3>
+    <p>
+      <code>build_shape_collection(cfg, num_shapes)</code> is the single entry point that dispatches
+      on <code>data.source</code> and returns a list of dicts <code>{"points", "sdf", "surface", "mesh"}</code>,
+      one per shape. <code>ShapeSDFDataset</code> then stacks these into contiguous tensors:
+    </p>
+    <div class="kv">
+      <div class="k"><code>self.points</code></div><div class="v">shape <code>(N, P, 3)</code> — N shapes × P points each</div>
+      <div class="k"><code>self.sdf</code></div><div class="v">shape <code>(N, P)</code></div>
+    </div>
+    <p>
+      Training needs mini-batches that mix points from <em>several different shapes</em> at once
+      (so gradients update several latent codes per step). <code>random_batch(num_shapes,
+      points_per_shape)</code> does this by (1) picking a random subset of shape indices, (2) for
+      each, picking random point indices from that shape's pre-sampled pool, and (3) concatenating
+      everything into three flat tensors: <code>shape_idx</code> (which code to look up),
+      <code>points</code>, and <code>sdf</code> targets. This is the tensor triplet that flows
+      directly into the Stage-1 training loop.
+    </p>
+  </section>
+</section>
+
+<!-- ==================== PART 2: STAGE 1 ==================== -->
+<section class="block" id="part-stage1">
+  <h2 class="h-part"><span class="tag stage1">PART 2</span> Stage 1 — the DeepSDF auto-decoder</h2>
+  <p>
+    Stage 1's job: learn one shared decoder network <code>f_θ(z, x)</code> and, simultaneously,
+    one latent code <code>z_i</code> per training shape, such that <code>f_θ(z_i, x) ≈</code> the
+    true SDF of shape <code>i</code> at point <code>x</code>, for every shape in the collection.
+  </p>
+
+  <section class="sub" id="autodecoder">
+    <h3 class="h-sub">2.1 Auto-decoder, not encoder — the key conceptual twist</h3>
+    <p>
+      A normal autoencoder has an <b>encoder</b> that maps a shape to a code. DeepSDF has
+      <b>no encoder at all</b>. Instead, each shape is assigned a free-floating trainable vector
+      (an embedding row, exactly like a word-embedding table), initialized from a tiny Gaussian,
+      and that vector is optimized <em>by gradient descent, jointly with the decoder weights</em>,
+      purely to minimize the reconstruction loss. This is the "auto-decoder" framework from the
+      DeepSDF paper (Park et al., 2019).
+    </p>
+    <div class="callout note">
+      <span class="lbl">Why this matters for Stage 2</span>
+      Because there's no encoder, there is also no natural way to know what a "new" valid code
+      looks like — an encoder would implicitly define a manifold of encodable inputs, but an
+      auto-decoder's codes are just <em>N</em> free points floating in \(\mathbb{R}^D\) that
+      happened to land somewhere useful. That's precisely the gap Stage 2 exists to fill: learn
+      the distribution that these <em>N</em> points came from, so you can draw a new one.
+    </div>
+  </section>
+
+  <section class="sub" id="latent-codes">
+    <h3 class="h-sub">2.2 The latent codes module <span class="badge-io">src/models/latent_codes.py</span></h3>
+    <p>
+      <code>LatentCodes</code> is a thin wrapper around <code>nn.Embedding(num_shapes, latent_dim)</code>:
+      row <code>i</code> is shape <code>i</code>'s code. It's initialized from
+      \(\mathcal{N}(0, 0.01^2)\) — deliberately tiny, so training starts from "every shape looks
+      almost identical" and differentiates gradually, which is more stable than starting from
+      large random codes.
+    </p>
+    <pre><code class="language-python">class LatentCodes(nn.Module):
+    def __init__(self, num_shapes, latent_dim, init_std=0.01):
+        super().__init__()
+        self.embedding = nn.Embedding(num_shapes, latent_dim)
+        nn.init.normal_(self.embedding.weight, mean=0.0, std=init_std)
+
+    def forward(self, shape_idx):
+        return self.embedding(shape_idx)   # lookup: index -> code vector</code></pre>
+    <p>Because it's an <code>nn.Module</code> with registered parameters, <code>codes.parameters()</code> plugs straight into the same Adam optimizer as the decoder — that's what makes the "joint" optimization trivial to implement.</p>
+  </section>
+
+  <section class="sub" id="decoder-arch">
+    <h3 class="h-sub">2.3 The decoder architecture <span class="badge-io">src/models/decoder.py</span></h3>
+    <p><code>DeepSDFDecoder</code> is an MLP that takes the concatenation <code>[z ; xyz]</code> (a <code>(D+3)</code>-dim vector) and predicts one scalar: the SDF value at that point, for that shape.</p>
+    <div class="kv">
+      <div class="k">Depth / width</div><div class="v">8 hidden layers × 512 units (base config), or 128 units in the smoke config</div>
+      <div class="k">Skip connection</div><div class="v">at layer 4, the original input <code>[z;xyz]</code> is concatenated back in — prevents the input signal from being "washed out" in deep layers</div>
+      <div class="k">Weight normalization</div><div class="v">applied to every hidden layer (not the output layer) — reparameterizes each weight as magnitude × direction, which empirically stabilizes SDF-MLP training</div>
+      <div class="k">Activation</div><div class="v">ReLU + dropout (p=0.2 in the base config, since DeepSDF over-fits on tiny N otherwise)</div>
+      <div class="k">Output</div><div class="v">a final <code>tanh</code> squashes the SDF prediction into <code>(-1, 1)</code>, matching the clamped loss range</div>
+    </div>
+    <pre><code class="language-python">def forward(self, latent, xyz):
+    inputs = torch.cat([latent, xyz], dim=-1)   # [B, D+3]
+    x = inputs
+    for layer, linear in enumerate(self.layers):
+        if layer in self.skip_in:
+            x = torch.cat([x, inputs], dim=-1)   # re-inject input at layer 4
+        x = linear(x)
+        if layer < self.num_layers - 1:
+            x = self.activation(x)
+            if self.dropout_prob > 0:
+                x = self.dropout(x)
+    if self.use_tanh:
+        x = torch.tanh(x)
+    return x</code></pre>
+    <p>
+      Note this network is <b>shared across every shape</b> in the collection — the only thing
+      that changes per shape is which <code>z</code> gets concatenated in. This is what lets a
+      single set of weights represent an entire category of shapes, and it's exactly why freezing
+      \(\theta\) after Stage 1 and treating <code>z</code> as the only "sample-able" variable makes
+      sense: the decoder is a fixed function, the codes are the data.
+    </p>
+  </section>
+
+  <section class="sub" id="geo-init">
+    <h3 class="h-sub">2.4 Geometric initialization — starting the network as a sphere</h3>
+    <p>
+      SDF-MLPs are notoriously prone to a degenerate failure mode: at random initialization, the
+      network's output can be roughly constant everywhere in space. If the constant is never
+      exactly zero, there is no zero level-set — Marching Cubes finds nothing, and gradients from
+      the reconstruction loss are weak because the field doesn't respond to <code>x</code> in a
+      useful way. <b>Geometric initialization</b> (Atzmon &amp; Lipman 2020 "SAL"; Gropp et al.
+      2020 "IGR") sidesteps this by choosing the initial weights so the network starts out
+      computing (approximately) \(f(\mathbf{x}) \approx \lVert \mathbf{x} \rVert - r\) — the exact
+      SDF of a sphere of radius <code>r</code> — regardless of the latent code.
+    </p>
+    <pre><code class="language-python">def _geometric_init(self, linears, radius):
+    last = self.num_layers - 1
+    for layer, lin in enumerate(linears):
+        out_dim, in_dim = lin.weight.shape
+        if layer == last:
+            # output layer ~ ||x|| - radius
+            nn.init.normal_(lin.weight, mean=math.sqrt(math.pi) / math.sqrt(in_dim), std=1e-5)
+            nn.init.constant_(lin.bias, -radius)
+        else:
+            nn.init.constant_(lin.bias, 0.0)
+            nn.init.normal_(lin.weight, 0.0, math.sqrt(2.0) / math.sqrt(out_dim))
+            if layer == 0:
+                lin.weight.data[:, :self.latent_dim] = 0.0   # kill z's influence...
+            if layer in self.skip_in:
+                lin.weight.data[:, -self.input_dim:] = 0.0   # ...at every re-injection point</code></pre>
+    <p>Three ideas combine here:</p>
+    <ul>
+      <li><b>Output layer</b> weights/bias are set so the final linear+tanh layer approximates \(\lVert h \rVert - r\) for whatever features <code>h</code> arrive, which is the signature of a sphere SDF when the earlier layers behave roughly like an orthogonal map.</li>
+      <li><b>Hidden layers</b> use a specific variance (\(\sqrt{2/\text{out\_dim}}\)) derived so that, combined with ReLU, the expected norm of activations is preserved layer to layer (a geometric-init analogue of Kaiming initialization).</li>
+      <li><b>The latent columns are explicitly zeroed</b> at layer 0 (and again wherever the skip connection re-injects the input). This is the crucial trick for an auto-decoder specifically: at step 0, <em>every</em> shape's code is a different tiny random vector, but zeroing out <code>z</code>'s contribution to the first layer means the network initially ignores <code>z</code> entirely and produces the exact same sphere for every shape. Training then differentiates the sphere into different shapes as the codes move and the latent columns stop being zero.</li>
+    </ul>
+    <div class="callout warn">
+      <span class="lbl">Observed failure without it</span>
+      The project's own report notes that without geometric init, the decoder was observed to
+      collapse to a spatially-constant field for some (N, D) cells — confirming this isn't
+      cosmetic, it's load-bearing for training stability across the whole grid.
+    </div>
+  </section>
+
+  <section class="sub" id="stage1-loss">
+    <h3 class="h-sub">2.5 Loss function and training loop <span class="badge-io">src/train/stage1_train.py</span></h3>
+    <p>The per-step loss has two terms:</p>
+    \[
+    \mathcal{L} = \underbrace{\frac{1}{|B|}\sum_{(i,\mathbf{x})\in B} \bigl|\,\mathrm{clamp}(f_\theta(\mathbf{z}_i,\mathbf{x}),\delta) - \mathrm{clamp}(s(\mathbf{x}),\delta)\,\bigr|}_{\text{clamped-}L_1\text{ reconstruction}} \;+\; \underbrace{\lambda \cdot \frac{1}{|B|}\sum_i \lVert \mathbf{z}_i \rVert_2^2}_{\text{code regularization}}
+    \]
+    <pre><code class="language-python">def clamped_l1_loss(pred, target, delta):
+    pred_c = torch.clamp(pred, -delta, delta)
+    target_c = torch.clamp(target, -delta, delta)
+    return torch.abs(pred_c - target_c).mean()</code></pre>
+    <table>
+      <tr><th>Term</th><th>Purpose</th></tr>
+      <tr><td>Clamping to <code>δ = 0.1</code></td><td>Far from the surface, exact SDF magnitude doesn't matter — only its sign / rough distance. Clamping stops the loss from being dominated by large far-field errors and focuses capacity near the surface where precision matters.</td></tr>
+      <tr><td>L1 instead of L2</td><td>More robust to the sampling noise inherent in near-surface perturbation.</td></tr>
+      <tr><td>Code regularization <code>λ‖z‖²</code></td><td>Pulls every code toward the origin. This is exactly a Gaussian-prior MAP estimate: minimizing <code>‖z‖²</code> is equivalent to maximizing <code>log N(z; 0, I)</code>. This is also precisely why a plain Gaussian is a <i>principled</i> Stage-2 candidate, not an arbitrary baseline — it's the same prior implicitly assumed by this regularizer.</td></tr>
+    </table>
+    <p>The training loop itself is a standard joint-optimization Adam loop, with separate learning rates for decoder and codes (both 1e-3 by default):</p>
+    <ol class="step-list">
+      <li>Sample a batch: <code>shapes_per_batch</code> random shapes × <code>points_per_shape</code> random points each, via <code>dataset.random_batch(...)</code>.</li>
+      <li>Look up each point's shape code: <code>z = codes(idx)</code>.</li>
+      <li>Forward through the decoder: <code>pred = decoder(z, pts)</code>.</li>
+      <li>Compute clamped-L1 reconstruction loss + code regularization, sum them.</li>
+      <li>Backprop through <em>both</em> the decoder parameters and the embedding table, and step one shared Adam optimizer (with per-group learning rates).</li>
+      <li>Every <code>log_every</code> steps, record <code>{step, loss, recon, reg}</code> for later plotting.</li>
+    </ol>
+    <p>The function returns <code>{"decoder", "codes", "history"}</code> — everything Stage 2 and the evaluation code need.</p>
+  </section>
+</section>
+
+<!-- ==================== PART 3: STAGE 2 ==================== -->
+<section class="block" id="part-stage2">
+  <h2 class="h-part"><span class="tag stage2">PART 3</span> Stage 2 — two generators over the frozen latent space</h2>
+  <p>
+    At this point Stage 1 has produced a frozen decoder <code>f_θ</code> and a fixed matrix of
+    <code>N</code> codes <code>{z_i} ⊂ ℝ^D</code>. Stage 2 never touches the decoder or the SDF
+    data again — it treats <code>{z_i}</code> as an ordinary <code>N × D</code> point cloud in
+    latent space and fits a generative model to it.
+  </p>
+
+  <section class="sub" id="why-prior">
+    <h3 class="h-sub">3.1 Why not just sample \(\mathcal{N}(0, I)\) directly?</h3>
+    <p>
+      The code regularizer during Stage 1 nudges codes toward a standard normal, so in principle
+      \(z \sim \mathcal{N}(0, I)\) should be a reasonable prior already. In practice the learned
+      codes rarely fill an isotropic, axis-aligned Gaussian — they can be anisotropic, correlated,
+      shifted off-center, or (with small N) clustered in a way a fixed identity covariance can't
+      capture. Sampling blindly from \(\mathcal{N}(0,I)\) then frequently lands outside the region
+      the decoder was actually trained on, producing broken or empty shapes. Both Stage-2
+      generators exist to fix this by <em>fitting</em> to the actual empirical distribution of
+      <code>{z_i}</code> instead of assuming it.
+    </p>
+  </section>
+
+  <section class="sub" id="gaussian-prior">
+    <h3 class="h-sub">3.2 Generator A — the Gaussian prior <span class="badge-io">src/models/gaussian_prior.py</span></h3>
+    <p>
+      This is the "minimal" generator: fit a multivariate Gaussian \(\mathcal{N}(\mu, \Sigma)\) to
+      <code>{z_i}</code> by maximum likelihood (i.e. sample mean and sample covariance), then
+      sample from it in closed form. Two covariance modes are supported:
+    </p>
+    <table>
+      <tr><th>Mode</th><th>Fitting</th><th>Sampling</th></tr>
+      <tr><td><code>diagonal</code></td><td>per-dimension mean and standard deviation</td><td><code>z = μ + ε ⊙ σ</code>, <code>ε ~ N(0,I)</code></td></tr>
+      <tr><td><code>full</code> (default)</td><td>full <code>D×D</code> covariance matrix + a small ridge <code>reg·I</code> for numerical stability, then Cholesky-factorized: <code>Σ = L Lᵀ</code></td><td><code>z = μ + Lε</code></td></tr>
+    </table>
+    <pre><code class="language-python">def fit(self, codes):
+    codes = codes.detach().float()
+    self.mean = codes.mean(dim=0)
+    centered = codes - self.mean
+    cov = (centered.t() @ centered) / max(codes.shape[0] - 1, 1)
+    cov = cov + self.reg * torch.eye(dim)          # ridge: keeps Σ positive-definite
+    self.chol = torch.linalg.cholesky(cov)          # Σ = L Lᵀ
+
+@torch.no_grad()
+def sample(self, num_samples, generator=None):
+    eps = torch.randn(num_samples, dim, generator=generator)
+    return self.mean + eps @ self.chol.t()          # z = μ + Lε</code></pre>
+    <p>
+      The ridge term <code>reg · I</code> matters at small <code>N</code>: with fewer samples than
+      dimensions (or close to it), the raw sample covariance can be singular or ill-conditioned,
+      and Cholesky factorization would fail. Adding a small multiple of the identity guarantees
+      positive-definiteness at negligible cost to fidelity.
+    </p>
+    <div class="callout why">
+      <span class="lbl">Why this is a meaningful baseline, not a strawman</span>
+      Capturing full linear correlations between latent dimensions is already more than the
+      isotropic <code>N(0,I)</code> the code regularizer assumes — it's the best possible
+      <em>unimodal, linear-Gaussian</em> fit to the codes. If a DDPM can't beat this by much, it
+      means the empirical code distribution doesn't have enough non-Gaussian structure (multi-modality,
+      curvature, heavy tails) for the diffusion model's extra expressiveness to pay off — which is
+      exactly the scientific question this project asks.
+    </div>
+  </section>
+
+  <section class="sub" id="ddpm">
+    <h3 class="h-sub">3.3 Generator B — the latent DDPM <span class="badge-io">src/models/ddpm.py</span></h3>
+    <p>
+      This reuses the exact denoising-diffusion formulation from Ho et al. (2020) (the same
+      construction behind HW3's image diffusion), applied to plain <code>D</code>-dimensional
+      vectors instead of images. There is no image, no U-Net, no convolutions — just an MLP that
+      denoises points in latent space.
+    </p>
+
+    <h4 class="h-subsub">Forward process — turning a clean code into noise</h4>
+    <p>
+      A noise schedule \(\{\beta_t\}_{t=1}^{T}\) defines \(\alpha_t = 1-\beta_t\) and
+      \(\bar\alpha_t = \prod_{s\le t}\alpha_s\). The forward ("noising") process has a closed form
+      that lets you jump straight to any timestep without simulating intermediate steps:
+    </p>
+    \[
+    q(\mathbf{z}_t \mid \mathbf{z}_0) = \mathcal{N}\!\left(\sqrt{\bar\alpha_t}\,\mathbf{z}_0,\; (1-\bar\alpha_t) I \right)
+    \quad\Longrightarrow\quad
+    \mathbf{z}_t = \sqrt{\bar\alpha_t}\,\mathbf{z}_0 + \sqrt{1-\bar\alpha_t}\,\boldsymbol{\epsilon}, \;\; \boldsymbol{\epsilon}\sim\mathcal{N}(0,I)
+    \]
+    <pre><code class="language-python">def q_sample(self, z_0, t, noise):
+    sqrt_ac = self.sqrt_alphas_cumprod[t].unsqueeze(-1)
+    sqrt_om = self.sqrt_one_minus_alphas_cumprod[t].unsqueeze(-1)
+    return sqrt_ac * z_0 + sqrt_om * noise</code></pre>
+
+    <h4 class="h-subsub">Noise schedule — cosine vs. linear</h4>
+    <p>
+      Two schedules are implemented; the default is the <b>cosine schedule</b> (Nichol &amp;
+      Dhariwal, 2021), which keeps \(\bar\alpha_t\) from collapsing to zero too quickly at early
+      timesteps — this was found empirically to give more stable training than the original
+      linear schedule, especially with very few diffusion steps (100–200 here, vs. thousands
+      typical for images):
+    </p>
+    <pre><code class="language-python">if schedule == "cosine":
+    steps = num_timesteps + 1
+    x = torch.linspace(0, num_timesteps, steps)
+    s = 0.008
+    f = torch.cos(((x / num_timesteps) + s) / (1 + s) * math.pi / 2) ** 2
+    alphas_cumprod = f / f[0]
+    betas = 1 - (alphas_cumprod[1:] / alphas_cumprod[:-1])
+    return betas.clamp(1e-5, 0.999)</code></pre>
+
+    <h4 class="h-subsub">The denoiser network — MLPDenoiser</h4>
+    <p>
+      A small residual MLP predicts the noise \(\boldsymbol{\epsilon}_\phi(\mathbf{z}_t, t)\) that was
+      added at timestep <code>t</code>. The timestep is encoded with a <b>sinusoidal embedding</b>
+      (the same trick as Transformer positional encodings — a fixed, non-learned mapping from a
+      scalar integer to a smooth, high-dimensional vector so the network can distinguish
+      neighboring timesteps easily):
+    </p>
+    <pre><code class="language-python">def sinusoidal_time_embedding(timesteps, dim):
+    half = dim // 2
+    freqs = torch.exp(-math.log(10000.0) * torch.arange(half) / max(half - 1, 1))
+    args = timesteps.float()[:, None] * freqs[None, :]
+    return torch.cat([torch.cos(args), torch.sin(args)], dim=-1)
+
+class MLPDenoiser(nn.Module):
+    def forward(self, z_t, t):
+        temb = self.time_mlp(sinusoidal_time_embedding(t, self.time_embed_dim))
+        h = self.input_proj(z_t)
+        for block in self.blocks:
+            h = h + self.act(block(h + temb))   # residual block, time injected additively
+        return self.output_proj(h)</code></pre>
+    <p>Each residual block adds the time embedding into the hidden state before a linear+SiLU, then adds the result back as a residual — this is the standard "FiLM-lite" way small diffusion MLPs condition on time without full attention or normalization layers.</p>
+
+    <h4 class="h-subsub">Training objective</h4>
+    <p>The DDPM training loss is beautifully simple — predict the noise that was added, regress with MSE:</p>
+    \[
+    \mathcal{L}_{\text{DDPM}} = \mathbb{E}_{\mathbf{z}_0,\, t\sim U(1,T),\, \boldsymbol\epsilon\sim\mathcal{N}(0,I)} \left\lVert \boldsymbol\epsilon_\phi(\mathbf{z}_t, t) - \boldsymbol\epsilon \right\rVert_2^2
+    \]
+    <pre><code class="language-python">def loss(self, z_0):
+    t = torch.randint(0, self.num_timesteps, (z_0.shape[0],))
+    noise = torch.randn_like(z_0)
+    z_t = self.q_sample(z_0, t, noise)
+    noise_pred = self.model(z_t, t)
+    return torch.mean((noise_pred - noise) ** 2)</code></pre>
+    <p>Every training step: sample a batch of real codes, pick a random timestep per example, noise them, ask the network to recover the noise, backprop. <code>train_ddpm</code> (in <code>src/train/stage2_ddpm.py</code>) wraps this in a standard Adam loop, logging loss every 200 steps.</p>
+
+    <h4 class="h-subsub">Reverse process — ancestral sampling (generation)</h4>
+    <p>
+      To generate a new code, start from pure noise \(\mathbf{z}_T \sim \mathcal{N}(0,I)\) and
+      iteratively denoise, one timestep at a time, using the trained network's noise prediction to
+      estimate the reverse-process mean, and adding calibrated noise back in (except at the very
+      last step):
+    </p>
+    \[
+    \boldsymbol\mu_\theta(\mathbf{z}_t, t) = \frac{1}{\sqrt{\alpha_t}}\left(\mathbf{z}_t - \frac{\beta_t}{\sqrt{1-\bar\alpha_t}}\boldsymbol\epsilon_\phi(\mathbf{z}_t,t)\right), \qquad
+    \mathbf{z}_{t-1} = \boldsymbol\mu_\theta(\mathbf{z}_t,t) + \sqrt{\tilde\beta_t}\,\mathbf{n},\;\; \mathbf{n}\sim\mathcal{N}(0,I)
+    \]
+    <pre><code class="language-python">@torch.no_grad()
+def sample(self, num_samples, device="cpu", generator=None):
+    z = torch.randn(num_samples, self.latent_dim, device=device, generator=generator)
+    for step in reversed(range(self.num_timesteps)):
+        t = torch.full((num_samples,), step, dtype=torch.long)
+        noise_pred = self.model(z, t)
+        mean = (z - self.betas[step] / self.sqrt_one_minus_alphas_cumprod[step] * noise_pred) \
+               / torch.sqrt(self.alphas[step])
+        if step > 0:
+            noise = torch.randn(num_samples, self.latent_dim, generator=generator)
+            z = mean + torch.sqrt(self.posterior_variance[step]) * noise
+        else:
+            z = mean   # no noise on the final step
+    return z</code></pre>
+    <p>
+      This loop runs <code>num_timesteps</code> (100–200) sequential network evaluations per
+      sample — the fundamental reason diffusion is far more expensive than the Gaussian, which
+      samples in a single matrix multiply. That cost/benefit trade-off is the entire point of the
+      experiment grid.
+    </p>
+  </section>
+
+  <div class="callout note">
+    <span class="lbl">Gaussian vs. DDPM at a glance</span>
+    <table>
+      <tr><th></th><th>Gaussian</th><th>Latent DDPM</th></tr>
+      <tr><td>Parameters learned</td><td><code>μ, Σ</code> — closed-form, no gradient descent</td><td>an MLP <code>ε_φ</code>, trained for ~3000 Adam steps</td></tr>
+      <tr><td>Expressiveness</td><td>unimodal, only linear correlations</td><td>can represent multi-modal, non-linear distributions</td></tr>
+      <tr><td>Sampling cost</td><td>1 matrix multiply</td><td>~100–200 sequential network passes</td></tr>
+      <tr><td>Data hunger</td><td>needs enough samples to estimate <code>Σ</code> (⪆D ideally)</td><td>needs enough samples to train a network without overfitting</td></tr>
+    </table>
+  </div>
+</section>
+
+<!-- ==================== PART 4: INFERENCE ==================== -->
+<section class="block" id="part-inference">
+  <h2 class="h-part"><span class="tag infer">PART 4</span> From a latent code back to a mesh</h2>
+  <p>Both generators produce the same kind of object: a vector <code>z ∈ ℝ^D</code>. Turning that into something visual/measurable is the same two-step process regardless of which generator produced it.</p>
+
+  <section class="sub" id="marching">
+    <h3 class="h-sub">4.1 Marching Cubes wrapper <span class="badge-io">src/marching.py</span></h3>
+    <p>
+      <code>eval_sdf_on_grid</code> builds a dense <code>resolution³</code> grid over
+      <code>[-bound, bound]³</code>, and evaluates any SDF-like callable on it in memory-safe
+      chunks (default 65536 points at a time — important on Colab GPUs with limited VRAM).
+      <code>sdf_grid_to_mesh</code> then runs <b>Marching Cubes</b> (Lorensen &amp; Cline, 1987) —
+      the classic algorithm that walks every cube (voxel) in the grid and, based on which corners
+      are positive/negative, emits triangles approximating the zero level-set — at <code>level=0</code>
+      to get a watertight-ish triangle mesh, converting grid coordinates back to world coordinates.
+      It gracefully returns <code>None</code> if the whole volume is on one side of zero (no
+      surface exists, e.g. the decoder produced garbage).
+    </p>
+  </section>
+
+  <section class="sub" id="sample-py">
+    <h3 class="h-sub">4.2 sample.py — the full z → mesh / point-cloud pipeline</h3>
+    <p><code>decode_sdf_grid</code> is the decoder-specific analogue of <code>eval_sdf_on_grid</code>: it broadcasts one latent code across every grid point and queries the network in chunks:</p>
+    <pre><code class="language-python">lat = latent.expand(pts.shape[0], -1)     # same code, every grid point
+sdf = decoder(lat, pts).squeeze(-1).cpu()</code></pre>
+    <p><code>decode_mesh</code> chains this into Marching Cubes, and <code>decode_point_cloud</code> further samples a surface point cloud from the resulting mesh — the representation the metrics in Part 5 actually consume. This single utility is reused by: reconstruction evaluation (decoding <em>known</em> codes), generation evaluation (decoding <em>sampled</em> codes from either generator), and the qualitative gallery figure.</p>
+  </section>
+</section>
+
+<!-- ==================== PART 5: METRICS ==================== -->
+<section class="block" id="part-metrics">
+  <h2 class="h-part"><span class="tag eng">PART 5</span> Measuring quality — the metrics suite</h2>
+  <p>Two different questions are being asked, and each gets its own metric family.</p>
+
+  <section class="sub" id="recon-metrics">
+    <h3 class="h-sub">5.1 Reconstruction metrics <span class="badge-io">src/metrics/reconstruction.py</span></h3>
+    <p><i>"Given a shape's own trained code, how well does the decoder reproduce that exact shape?"</i> This isolates Stage-1 quality, independent of either generator.</p>
+    <div class="kv">
+      <div class="k">Chamfer distance</div><div class="v">symmetric nearest-neighbor distance between two point clouds — for every point in cloud A, distance to its nearest neighbor in B, averaged, plus the same in reverse. Computed efficiently with a <code>scipy.spatial.cKDTree</code>.</div>
+      <div class="k">Volumetric IoU</div><div class="v">rasterize both meshes' occupancy on a shared grid (via <code>mesh.contains(grid)</code>) and compute intersection-over-union of the occupied voxels.</div>
+    </div>
+    \[
+    \mathrm{CD}(A,B) = \frac{1}{|A|}\sum_{a\in A}\min_{b\in B}\lVert a-b\rVert^2 + \frac{1}{|B|}\sum_{b\in B}\min_{a\in A}\lVert a-b\rVert^2
+    \]
+  </section>
+
+  <section class="sub" id="gen-metrics">
+    <h3 class="h-sub">5.2 Generation metrics (Achlioptas et al., 2018) <span class="badge-io">src/metrics/generation.py</span></h3>
+    <p><i>"Given a batch of freshly sampled shapes, do they look like they came from the same distribution as real shapes?"</i> This is what actually differentiates the Gaussian from the DDPM. All three metrics are built on a pairwise Chamfer-distance matrix between a set of generated point clouds and a held-out reference set of real shapes.</p>
+    <table>
+      <tr><th>Metric</th><th>Definition</th><th>Ideal value</th><th>What it captures</th></tr>
+      <tr><td>MMD (Minimum Matching Distance)</td><td>for each reference shape, distance to its closest generated shape, averaged</td><td>0 (lower is better)</td><td>fidelity — are generated shapes close to real ones?</td></tr>
+      <tr><td>Coverage</td><td>fraction of reference shapes that are the nearest neighbor of <em>some</em> generated shape</td><td>1.0 (higher is better)</td><td>diversity / mode coverage — does generation reproduce the full variety, or collapse to a few modes?</td></tr>
+      <tr><td>1-NN accuracy</td><td>pool generated+reference clouds together; for each, check whether its nearest neighbor has the same label (generated vs. real); average accuracy of this classifier</td><td>0.5 (indistinguishable)</td><td>a genuine two-sample test — 1.0 or 0.0 both mean the two distributions are trivially separable (bad); 0.5 means real and fake are statistically indistinguishable under Chamfer distance</td></tr>
+    </table>
+    <p>The reference set is built from a <em>disjoint</em> random seed (<code>cfg.seed + 10000</code> in <code>run_grid.py</code>) so it is never contaminated by the training shapes.</p>
+    <div class="callout note">
+      <span class="lbl">valid_ratio, a fourth silent metric</span>
+      Not from Achlioptas et al., but tracked throughout: the fraction of sampled codes that
+      actually decoded to a non-empty mesh at all (some samples, especially poorly-fit or
+      out-of-distribution ones, can decode to "no zero crossing found"). A generator that samples
+      garbage codes will have a low <code>valid_ratio</code> even before its shapes are compared to
+      references.
+    </div>
+  </section>
+</section>
+
+<!-- ==================== PART 6: ORCHESTRATION ==================== -->
+<section class="block" id="part-orchestration">
+  <h2 class="h-part"><span class="tag eng">PART 6</span> Orchestration — running the full experiment grid</h2>
+
+  <section class="sub" id="config">
+    <h3 class="h-sub">6.1 The config system <span class="badge-io">src/utils/config.py</span></h3>
+    <p>
+      Configs are plain YAML, loaded into an <code>AttrDict</code> — a dict subclass that
+      recursively wraps nested dicts/lists so you can write <code>cfg.stage1.lr_decoder</code>
+      instead of <code>cfg["stage1"]["lr_decoder"]</code>. It also supports <code>.merge({...})</code>
+      with dotted keys, used e.g. to build the held-out reference set with a different seed
+      without duplicating the whole config:
+    </p>
+    <pre><code class="language-python">ref_cfg = cfg.merge({"seed": int(cfg.seed) + 10_000})</code></pre>
+    <p>Two configs ship with the project and run the <em>identical code path</em> — only the numbers differ:</p>
+    <table>
+      <tr><th></th><th><code>base.yaml</code></th><th><code>smoke.yaml</code></th></tr>
+      <tr><td>Purpose</td><td>full-scale results, Colab GPU</td><td>fast end-to-end sanity check, CPU, minutes</td></tr>
+      <tr><td>Device</td><td><code>cuda</code> (auto-falls back to CPU)</td><td><code>cpu</code></td></tr>
+      <tr><td>SDF samples / shape</td><td>30,000</td><td>4,000</td></tr>
+      <tr><td>Decoder width</td><td>512</td><td>128</td></tr>
+      <tr><td>Stage-1 iterations</td><td>4,000</td><td>400</td></tr>
+      <tr><td>DDPM iterations</td><td>3,000</td><td>400</td></tr>
+      <tr><td>Grid</td><td>N∈{10,50,150} × D∈{16,32}</td><td>N∈{10,50} × D∈{16,32}</td></tr>
+    </table>
+    <p>The <code>outputs/smoke/</code> directory checked into this repo is real output from running the smoke config end-to-end — see <a href="#part-results">Part 9</a> for the actual numbers it produced.</p>
+  </section>
+
+  <section class="sub" id="run-grid">
+    <h3 class="h-sub">6.2 run_grid.py — step by step</h3>
+    <p>For <em>every</em> combination of <code>(N, D)</code> in the grid, <code>run_cell()</code> performs, in order:</p>
+    <ol class="step-list">
+      <li><b>Seed everything</b> deterministically from <code>cfg.seed</code> (so every cell starts from a controlled, comparable RNG state).</li>
+      <li><b>Build the training data</b>: <code>build_shape_collection(cfg, N)</code> → <code>ShapeSDFDataset</code>.</li>
+      <li><b>Train Stage 1</b>: <code>train_stage1(cfg, dataset, D)</code> → decoder + codes + loss history.</li>
+      <li><b>Evaluate reconstruction</b>: decode up to <code>eval.max_recon_shapes</code> of the training codes back to meshes, compare Chamfer + IoU against ground truth.</li>
+      <li><b>Build a held-out reference set</b> (disjoint seed) for generation metrics.</li>
+      <li><b>Fit the Gaussian</b> on the frozen codes; sample <code>eval.num_generated</code> new codes; decode each to a point cloud; compute Coverage / MMD / 1-NN / valid_ratio against the reference set.</li>
+      <li><b>Train the DDPM</b> on the same frozen codes; sample the same number of new codes; same generation evaluation.</li>
+      <li><b>Persist everything</b>: a resumable <code>checkpoint.pt</code> (decoder weights, code embedding, config, N, D) and a <code>metrics.json</code> (all metrics + both loss histories) per cell, under <code>outputs/&lt;run&gt;/N{N}_D{D}/</code>.</li>
+    </ol>
+    <p>After all cells finish, a single <code>summary.json</code> aggregates every cell's results — this is the one file <code>make_figures.py</code> actually needs to read.</p>
+    <p>CLI flags <code>--only-N</code> / <code>--only-D</code> let you re-run a single cell in isolation (useful for debugging one problematic combination without re-running the whole grid).</p>
+  </section>
+
+  <section class="sub" id="make-figures">
+    <h3 class="h-sub">6.3 make_figures.py — turning JSON into a report</h3>
+    <p>Reads <code>summary.json</code> and "flattens" it into one row per <code>(N, D, generator)</code> triple, then produces everything the report needs:</p>
+    <div class="kv">
+      <div class="k"><code>results.csv</code></div><div class="v">raw flattened table, for spreadsheets / further analysis</div>
+      <div class="k"><code>results_table.tex</code></div><div class="v">the exact LaTeX <code>tabular</code> block <code>\input</code>-ed by <code>report/main.tex</code></div>
+      <div class="k"><code>degradation_generation.png</code></div><div class="v">Coverage / MMD / 1-NN vs. N, one line per (generator, D) — the core result figure of the whole study</div>
+      <div class="k"><code>degradation_reconstruction.png</code></div><div class="v">Chamfer / IoU vs. N — a property of Stage 1 alone, shared by both generators</div>
+      <div class="k"><code>loss_curves.png</code></div><div class="v">Stage-1 and DDPM training loss curves for every cell, log-scale y-axis</div>
+      <div class="k"><code>gallery.png</code></div><div class="v">qualitative grid: reconstructions of real training codes (row 1) vs. shapes decoded from fresh Gaussian samples (row 2), for the largest-N cell</div>
+    </div>
+    <p>Notably, the figure script re-instantiates a real <code>DeepSDFDecoder</code> and reloads its weights straight from the saved checkpoint to produce the gallery — a good example of why checkpoints bundle the full architecture config, not just raw tensors.</p>
+  </section>
+</section>
+
+<!-- ==================== PART 7: ENGINEERING ==================== -->
+<section class="block" id="part-engineering">
+  <h2 class="h-part"><span class="tag eng">PART 7</span> Engineering scaffolding</h2>
+
+  <section class="sub" id="seed-io">
+    <h3 class="h-sub">7.1 Reproducibility &amp; checkpoints <span class="badge-io">src/utils/seed.py, src/utils/io.py</span></h3>
+    <p><code>seed_everything(seed)</code> seeds Python's <code>random</code>, NumPy, and both CPU and CUDA Torch RNGs in one call — used at the start of every grid cell so results are as reproducible as GPU nondeterminism allows.</p>
+    <p><code>save_checkpoint</code> / <code>load_checkpoint</code> are thin wrappers around <code>torch.save</code>/<code>torch.load</code>, but by convention every checkpoint bundles <em>everything</em> needed to reconstruct the run: decoder state dict, code embedding state dict, the full config dict, and <code>latent_dim</code>/<code>num_shapes</code> — so a checkpoint from a Colab run that got disconnected mid-grid can be reloaded and re-evaluated without re-training, and figures can be regenerated long after training finished.</p>
+  </section>
+
+  <section class="sub" id="prepare-data">
+    <h3 class="h-sub">7.2 prepare_data.py — the optional real-mesh utility</h3>
+    <p>Not part of the main pipeline — a standalone helper for working with a real mesh directory (e.g. ShapeNet chairs): <code>--inspect-dir</code> reports how many files in a directory actually load as valid, non-empty triangle meshes (many real-world mesh files fail this silently), and <code>--cache</code> pre-computes and stores SDF samples as a compressed <code>.npz</code> so repeated experiments over the same real dataset don't re-run the (slower) proximity-query sampling every time.</p>
+  </section>
+
+  <section class="sub" id="thirdparty">
+    <h3 class="h-sub">7.3 Authorship accounting <span class="badge-io">src/thirdparty/README.md</span></h3>
+    <p>This folder is intentionally empty — its README exists purely as a paper trail: it states explicitly that every algorithmic file under <code>src/</code> (decoder, codes, both generators, sampling, marching cubes, metrics, grid runner) is original implementation, lists the external <em>library</em> dependencies used as tools rather than vendored code (PyTorch, NumPy, SciPy, scikit-image, trimesh, Matplotlib, PyYAML), and lists the papers whose <em>algorithms</em> were re-implemented from scratch rather than copied (DeepSDF, DDPM, the cosine schedule, the Achlioptas generation-metric protocol).</p>
+  </section>
+</section>
+
+<!-- ==================== PART 8: TESTS ==================== -->
+<section class="block" id="part-tests">
+  <h2 class="h-part"><span class="tag eng">PART 8</span> Tests — the project's own sanity net</h2>
+  <p>The <code>tests/</code> directory doubles as the proposal's "mid-point checks," made executable:</p>
+  <table>
+    <tr><th>Test file</th><th>What it verifies</th></tr>
+    <tr><td><code>test_sdf_sampling.py</code></td><td>Sign convention is correct (inside points negative, outside positive) for both analytic shapes and mesh-derived SDFs; meshed analytic shapes have valid, in-bounds geometry.</td></tr>
+    <tr><td><code>test_decoder_overfit.py</code></td><td><b>Mid-point check 1</b>: training on a <em>single</em> shape drives the reconstruction loss down and produces a decodable, non-empty mesh — proves the decoder + loss + optimizer are wired correctly in isolation. <b>Mid-point check 2</b>: training on 10 shapes produces 10 distinct, moved-away-from-init codes, and interpolating between two codes decodes without crashing (a basic latent-space sanity check).</td></tr>
+    <tr><td><code>test_ddpm.py</code></td><td><code>q_sample</code> preserves shapes and the schedule's <code>alphas_cumprod</code> is properly monotonic; training on a synthetic clustered "fake code" distribution reduces loss and produces finite, correctly-shaped samples.</td></tr>
+    <tr><td><code>test_metrics.py</code></td><td>Chamfer distance is (near) zero for identical clouds and larger for shifted ones; Coverage/MMD/1-NN fall in their valid numeric ranges; 1-NN accuracy between two draws of the <em>same</em> distribution lands near the ideal 0.5.</td></tr>
+  </table>
+  <p>All tests run on CPU with tiny shapes/iteration counts, so the full suite finishes in seconds and can run in CI on every commit — a much faster feedback loop than launching a real grid cell.</p>
+</section>
+
+<!-- ==================== PART 9: RESULTS ==================== -->
+<section class="block" id="part-results">
+  <h2 class="h-part"><span class="tag eng">PART 9</span> Results walkthrough — reading a real run</h2>
+  <p>The <code>outputs/smoke/summary.json</code> checked into the repo is real output from a full smoke-config grid run (N∈{10,50}, D∈{16,32}, 400 iterations). It's a good way to see exactly what a "cell" of the grid produces end to end:</p>
+  <table>
+    <tr><th>N</th><th>D</th><th>Recon CD</th><th>Recon IoU</th><th>Gaussian Coverage / MMD / 1-NN</th><th>DDPM Coverage / MMD / 1-NN</th></tr>
+    <tr><td>10</td><td>16</td><td>0.00287</td><td>0.700</td><td>0.438 / 0.00386 / 0.813</td><td>0.375 / 0.00618 / 0.875</td></tr>
+    <tr><td>10</td><td>32</td><td>0.00265</td><td>0.652</td><td>0.438 / 0.00384 / 0.938</td><td>0.375 / 0.00961 / 0.897</td></tr>
+    <tr><td>50</td><td>16</td><td>0.00973</td><td>0.127</td><td>0.250 / 0.00593 / 1.000</td><td>0.500 / 0.00666 / 0.875</td></tr>
+    <tr><td>50</td><td>32</td><td>0.00783</td><td>0.422</td><td>0.313 / 0.00876 / 1.000</td><td>0.438 / 0.00709 / 0.906</td></tr>
+  </table>
+  <div class="callout note">
+    <span class="lbl">How to read this (with the huge caveat that this is the tiny smoke run, not the real experiment)</span>
+    <ul>
+      <li><b>Reconstruction degrades with N</b> (IoU drops from ~0.70 at N=10 to ~0.13–0.42 at N=50): a fixed-capacity decoder has to share its representational budget across more shapes, exactly the effect described in the report's discussion.</li>
+      <li><b>1-NN accuracy is far from the 0.5 ideal everywhere</b> (0.81–1.0): expected at this toy scale — only 400 Stage-1 iterations and 400 DDPM iterations (vs. 4000/3000 in the real config), so neither the decoder nor either generator is remotely converged. This table is a pipeline-correctness demonstration, not a scientific result.</li>
+      <li><b>The DDPM's noise-prediction loss visibly drops</b> across the 3 logged points in every cell (e.g. 1.24 → 0.08 → 0.10 for N=10,D=16), showing the training loop is learning something even in 400 steps.</li>
+    </ul>
+  </div>
+  <p>The real, fully-trained grid (via <code>base.yaml</code>) is what <code>report/main.tex</code>'s Table 1 and Figures 1–4 are built from, using the identical code path shown throughout this document.</p>
+</section>
+
+<!-- ==================== PART 10: LITERATURE ==================== -->
+<section class="block" id="part-lit">
+  <h2 class="h-part"><span class="tag eng">PART 10</span> How each piece maps back to the literature</h2>
+  <table>
+    <tr><th>Paper</th><th>What was borrowed (as an idea, reimplemented from scratch)</th><th>Where in the code</th></tr>
+    <tr><td>Park et al., 2019 — <b>DeepSDF</b></td><td>Auto-decoder framework; clamped-L1 loss; code regularization; near-surface sampling recipe</td><td><code>models/decoder.py</code>, <code>models/latent_codes.py</code>, <code>train/stage1_train.py</code>, <code>data/sdf_sampling.py</code></td></tr>
+    <tr><td>Atzmon &amp; Lipman, 2020 (SAL) / Gropp et al., 2020 (IGR)</td><td>Geometric initialization (start the SDF-MLP as a sphere)</td><td><code>models/decoder.py::_geometric_init</code></td></tr>
+    <tr><td>Ho et al., 2020 — <b>DDPM</b></td><td>Forward/reverse diffusion formulation, noise-prediction training objective, ancestral sampling</td><td><code>models/ddpm.py</code></td></tr>
+    <tr><td>Nichol &amp; Dhariwal, 2021</td><td>Cosine noise schedule</td><td><code>models/ddpm.py::_make_beta_schedule</code></td></tr>
+    <tr><td>Lorensen &amp; Cline, 1987</td><td>Marching Cubes algorithm (via <code>skimage.measure.marching_cubes</code>)</td><td><code>marching.py</code></td></tr>
+    <tr><td>Achlioptas et al., 2018</td><td>Coverage / MMD / 1-NN generation-metric protocol</td><td><code>metrics/generation.py</code></td></tr>
+    <tr><td>Nam et al., 2022 — <b>3D-LDM</b></td><td>Motivating prior work (latent diffusion over DeepSDF codes at ShapeNet scale) — this project asks whether its core idea still earns its complexity at 10–150 shapes rather than tens of thousands</td><td>project's core research question</td></tr>
+  </table>
+</section>
+
+<section class="block" id="glossary">
+  <h2 class="h-part"><span class="tag eng">Glossary</span></h2>
+  <div class="kv">
+    <div class="k">SDF</div><div class="v">Signed Distance Function — scalar field whose zero level-set is a surface; negative inside, positive outside.</div>
+    <div class="k">Auto-decoder</div><div class="v">A generative setup with no encoder — per-sample latent codes are free parameters, optimized jointly with the decoder via gradient descent.</div>
+    <div class="k">Latent code (z)</div><div class="v">A learned vector in ℝ^D that, fed into the shared decoder alongside a query point, identifies which shape to reconstruct.</div>
+    <div class="k">Marching Cubes</div><div class="v">Algorithm that extracts a triangle mesh from a scalar field sampled on a grid, at a chosen level (here, 0).</div>
+    <div class="k">Geometric init</div><div class="v">A weight initialization scheme that makes an SDF-MLP start out as an exact sphere, avoiding the "constant field, no surface" failure mode.</div>
+    <div class="k">Clamped L1 loss</div><div class="v">L1 loss on SDF values after clamping both prediction and target to ±δ, focusing training near the surface.</div>
+    <div class="k">DDPM</div><div class="v">Denoising Diffusion Probabilistic Model — learns to reverse a fixed noising process by predicting the noise added at each timestep.</div>
+    <div class="k">Cosine schedule</div><div class="v">A choice of noise-variance schedule β_t that decays ᾱ_t smoothly, improving training stability vs. a linear schedule.</div>
+    <div class="k">Chamfer distance</div><div class="v">Symmetric nearest-neighbor distance between two point clouds; base metric for both reconstruction and generation evaluation.</div>
+    <div class="k">Coverage / MMD / 1-NN</div><div class="v">Distribution-level generation metrics comparing a set of generated shapes to a held-out reference set.</div>
+    <div class="k">valid_ratio</div><div class="v">Fraction of sampled latent codes that decode to a non-empty mesh at all.</div>
+  </div>
+</section>
+
+<footer>
+  Generated as a companion reading guide to <code>Final_Project/code/</code> and
+  <code>Final_Project/report/main.tex</code>. Every code excerpt above is taken verbatim (or
+  lightly trimmed for length) from the actual project source files referenced next to each
+  section heading.
+</footer>
+
+</div>
+</main>
+</div>
+
+<a class="top-link" href="#overview" title="Back to top">↑</a>
+<script>hljs.highlightAll();</script>
+</body>
+</html>

@@ -1,0 +1,64 @@
+# Quick ShapeNet smoke test (CPU, a few minutes).
+# Point mesh_dir at a ShapeNet chairs folder (synset 03001627) or our tiny sample.
+seed: 0
+device: cpu
+
+data:
+  source: mesh_dir
+  # After download, use e.g. /path/to/ShapeNetCore.v2/03001627
+  mesh_dir: data/shapenet_chairs_test
+  num_points: 4000
+  surface_ratio: 0.9
+  sigmas: [0.005, 0.02]
+  num_surface_points: 1024
+  mesh_resolution: 32
+
+decoder:
+  hidden_dim: 128
+  num_layers: 8
+  skip_in: [4]
+  dropout_prob: 0.0
+  use_weight_norm: true
+  use_tanh: true
+  geometric_init: true
+  init_radius: 0.5
+
+stage1:
+  num_iters: 400
+  shapes_per_batch: 4
+  points_per_shape: 512
+  lr_decoder: 1.0e-3
+  lr_codes: 1.0e-3
+  clamp_delta: 0.1
+  code_init_std: 0.01
+  code_reg_lambda: 1.0e-4
+
+gaussian:
+  covariance: full
+  reg: 1.0e-5
+
+ddpm:
+  num_timesteps: 100
+  beta_start: 1.0e-4
+  beta_end: 0.02
+  schedule: cosine
+  hidden_dim: 128
+  num_layers: 3
+  time_embed_dim: 32
+  lr: 1.0e-3
+  num_iters: 400
+  batch_size: 16
+
+eval:
+  num_generated: 8
+  num_reference: 8
+  surface_points: 1024
+  recon_resolution: 32
+  iou_resolution: 24
+  max_recon_shapes: 4
+
+# N is capped by the number of meshes found in mesh_dir.
+grid:
+  N: [1]
+  D: [16]
+  generators: [gaussian, ddpm]
