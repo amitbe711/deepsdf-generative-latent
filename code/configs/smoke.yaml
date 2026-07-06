@@ -36,6 +36,12 @@ gaussian:
   covariance: full
   reg: 1.0e-5
 
+gmm:
+  num_components: 3
+  reg: 1.0e-5
+  max_iters: 100
+  min_points_per_component: 5
+
 ddpm:
   num_timesteps: 100
   beta_start: 1.0e-4
@@ -59,4 +65,4 @@ eval:
 grid:
   N: [10, 50]
   D: [16, 32]
-  generators: [gaussian, ddpm]
+  generators: [gaussian, gmm, ddpm]

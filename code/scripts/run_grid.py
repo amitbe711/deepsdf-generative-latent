@@ -35,7 +35,7 @@ from src.metrics.generation import (  # noqa: E402
 )
 from src.metrics.reconstruction import chamfer_distance, iou_from_meshes  # noqa: E402
 from src.sample import decode_mesh, decode_point_cloud  # noqa: E402
-from src.train import fit_gaussian, train_ddpm, train_stage1  # noqa: E402
+from src.train import fit_gaussian, fit_gmm, train_ddpm, train_stage1  # noqa: E402
 from src.utils import load_config, save_checkpoint, seed_everything  # noqa: E402
 from src.data.sdf_sampling import sample_surface_points  # noqa: E402
 
@@ -173,6 +173,15 @@ def run_cell(cfg, num_shapes: int, latent_dim: int, output_dir: Path, device: st
         )
         results["generators"]["gaussian"] = metrics
         print(f"[{tag}] gaussian: {metrics}")
+
+    if "gmm" in cfg.grid.generators:
+        gmm = fit_gmm(cfg, code_tensor)
+        gen = torch.Generator().manual_seed(int(cfg.seed) + 8)
+        metrics = evaluate_generator(
+            cfg, decoder, lambda n: gmm.sample(n, generator=gen), reference, device
+        )
+        results["generators"]["gmm"] = metrics
+        print(f"[{tag}] gmm: {metrics}")
 
     if "ddpm" in cfg.grid.generators:
         ddpm_out = train_ddpm(cfg, code_tensor, device=device, progress=False)

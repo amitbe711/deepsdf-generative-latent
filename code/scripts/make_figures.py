@@ -35,7 +35,8 @@ from src.utils import load_checkpoint  # noqa: E402
 
 GEN_METRICS = [("coverage", "Coverage (higher better)"),
                ("mmd", "MMD-CD (lower better)"),
-               ("one_nn_acc", "1-NN acc (0.5 ideal)")]
+               ("one_nn_acc", "1-NN acc (0.5 ideal)"),
+               ("valid_ratio", "Valid ratio (higher better)")]
 
 
 def load_summary(input_dir: Path) -> list[dict]:
@@ -83,16 +84,17 @@ def write_csv(rows: list[dict], path: Path) -> None:
 
 def write_latex_table(rows: list[dict], path: Path) -> None:
     lines = [
-        r"\begin{tabular}{llrrrrrr}",
+        r"\begin{tabular}{llrrrrrrr}",
         r"\toprule",
-        r"$N$ & $D$ & Gen. & Recon-CD & IoU & Coverage & MMD & 1-NN \\",
+        r"$N$ & $D$ & Gen. & Recon-CD & IoU & Coverage & MMD & 1-NN & Valid \\",
         r"\midrule",
     ]
     for r in sorted(rows, key=lambda x: (x["N"], x["D"], x["generator"])):
         lines.append(
             f"{r['N']} & {r['D']} & {r['generator']} & "
             f"{r['recon_chamfer']:.4f} & {r['recon_iou']:.3f} & "
-            f"{r['coverage']:.3f} & {r['mmd']:.4f} & {r['one_nn_acc']:.3f} \\\\"
+            f"{r['coverage']:.3f} & {r['mmd']:.4f} & {r['one_nn_acc']:.3f} & "
+            f"{r['valid_ratio']:.2f} \\\\"
         )
     lines += [r"\bottomrule", r"\end{tabular}"]
     path.write_text("\n".join(lines), encoding="utf-8")
@@ -120,8 +122,9 @@ def plot_generation_curves(rows: list[dict], path: Path) -> None:
         ax.set_title(title)
         ax.grid(True, alpha=0.3)
         ax.legend(fontsize=8)
-    if any(r["one_nn_acc"] == r["one_nn_acc"] for r in rows):
-        axes[-1].axhline(0.5, color="gray", linestyle="--", alpha=0.6)
+        # Mark the ideal 1-NN accuracy of 0.5 on its own panel.
+        if key == "one_nn_acc" and any(r["one_nn_acc"] == r["one_nn_acc"] for r in rows):
+            ax.axhline(0.5, color="gray", linestyle="--", alpha=0.6)
     fig.tight_layout()
     fig.savefig(path, dpi=150)
     plt.close(fig)

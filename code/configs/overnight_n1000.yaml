@@ -1,0 +1,74 @@
+# Overnight run: single grid cell size N=1000, both latent dims, all three generators.
+# Synthetic chairs. Heavier Stage-1 budget (more shapes share one decoder).
+# ~3–6 hr on Colab Pro GPU (2 cells: D=16 and D=32).
+#
+#   python scripts/run_grid.py --config configs/overnight_n1000.yaml \
+#       --output outputs/overnight_n1000
+#
+# RAM note: 1000 shapes × 30k SDF points ≈ 0.5 GB in memory — fine on Colab Pro.
+seed: 0
+device: cuda
+
+data:
+  source: synthetic
+  mesh_dir: null
+  num_points: 30000
+  surface_ratio: 0.9
+  sigmas: [0.005, 0.02]
+  num_surface_points: 4096
+  mesh_resolution: 64
+
+decoder:
+  hidden_dim: 512
+  num_layers: 8
+  skip_in: [4]
+  dropout_prob: 0.2
+  use_weight_norm: true
+  use_tanh: true
+  geometric_init: true
+  init_radius: 0.5
+
+stage1:
+  num_iters: 8000
+  shapes_per_batch: 32
+  points_per_shape: 2048
+  lr_decoder: 1.0e-3
+  lr_codes: 1.0e-3
+  clamp_delta: 0.1
+  code_init_std: 0.01
+  code_reg_lambda: 1.0e-4
+
+gaussian:
+  covariance: full
+  reg: 1.0e-5
+
+gmm:
+  num_components: 8
+  reg: 1.0e-5
+  max_iters: 300
+  min_points_per_component: 5
+
+ddpm:
+  num_timesteps: 200
+  beta_start: 1.0e-4
+  beta_end: 0.02
+  schedule: cosine
+  hidden_dim: 256
+  num_layers: 4
+  time_embed_dim: 64
+  lr: 1.0e-3
+  num_iters: 4000
+  batch_size: 128
+
+eval:
+  num_generated: 50
+  num_reference: 50
+  surface_points: 2048
+  recon_resolution: 64
+  iou_resolution: 32
+  max_recon_shapes: 20
+
+grid:
+  N: [1000]
+  D: [16, 32]
+  generators: [gaussian, gmm, ddpm]
