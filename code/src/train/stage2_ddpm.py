@@ -7,6 +7,7 @@ from typing import Any
 import torch
 
 from ..models.ddpm import LatentDDPM
+from ..utils.log import status
 
 
 def train_ddpm(
@@ -14,6 +15,9 @@ def train_ddpm(
     codes: torch.Tensor,
     device: str = "cpu",
     progress: bool = False,
+    verbose: bool = False,
+    prefix: str | None = None,
+    log_every: int = 200,
 ) -> dict[str, Any]:
     """Train the latent DDPM on ``codes`` [N, D]. Returns model + loss history."""
     d = cfg.ddpm
@@ -57,7 +61,13 @@ def train_ddpm(
         loss.backward()
         optimizer.step()
 
-        if step % 200 == 0 or step == num_iters - 1:
-            history.append({"step": float(step), "loss": float(loss.item())})
+        if step % log_every == 0 or step == num_iters - 1:
+            row = {"step": float(step), "loss": float(loss.item())}
+            history.append(row)
+            if verbose:
+                status(
+                    f"ddpm {int(step) + 1}/{num_iters} loss={row['loss']:.4f}",
+                    prefix=prefix,
+                )
 
     return {"model": model, "history": history}

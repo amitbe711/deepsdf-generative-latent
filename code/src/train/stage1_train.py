@@ -14,6 +14,7 @@ from torch import Tensor
 
 from ..models.decoder import DeepSDFDecoder
 from ..models.latent_codes import LatentCodes
+from ..utils.log import status
 
 
 def clamped_l1_loss(pred: Tensor, target: Tensor, delta: float) -> Tensor:
@@ -29,6 +30,8 @@ def train_stage1(
     device: str = "cpu",
     log_every: int = 200,
     progress: bool = False,
+    verbose: bool = False,
+    prefix: str | None = None,
 ) -> dict[str, Any]:
     """Train the auto-decoder. Returns decoder, codes and a loss history."""
     s1 = cfg.stage1
@@ -89,13 +92,18 @@ def train_stage1(
         optimizer.step()
 
         if step % log_every == 0 or step == num_iters - 1:
-            history.append(
-                {
-                    "step": float(step),
-                    "loss": float(loss.item()),
-                    "recon": float(recon.item()),
-                    "reg": float(reg.item()),
-                }
-            )
+            row = {
+                "step": float(step),
+                "loss": float(loss.item()),
+                "recon": float(recon.item()),
+                "reg": float(reg.item()),
+            }
+            history.append(row)
+            if verbose:
+                status(
+                    f"stage1 {int(step) + 1}/{num_iters} "
+                    f"loss={row['loss']:.4f} recon={row['recon']:.4f} reg={row['reg']:.6f}",
+                    prefix=prefix,
+                )
 
     return {"decoder": decoder, "codes": codes, "history": history}
