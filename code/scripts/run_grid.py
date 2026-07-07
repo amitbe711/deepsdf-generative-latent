@@ -310,6 +310,7 @@ def run_cell(
             json.dump(results, handle, indent=2)
 
     status(f"cell finished in {format_duration(results['seconds'])}", prefix=tag)
+    return results
 
 
 def main() -> None:
