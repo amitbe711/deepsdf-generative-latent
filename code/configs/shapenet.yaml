@@ -5,7 +5,7 @@ device: cuda
 
 data:
   source: mesh_dir
-  mesh_dir: /path/to/ShapeNetCore.v2/03001627
+  mesh_dir: /Users/amit.benbenishti/data/shapenet/03001627
   num_points: 8000
   surface_ratio: 0.9
   sigmas: [0.005, 0.02]

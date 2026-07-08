@@ -6,7 +6,7 @@ device: cpu
 data:
   source: mesh_dir
   # After download, use e.g. /path/to/ShapeNetCore.v2/03001627
-  mesh_dir: data/shapenet_chairs_test
+  mesh_dir: /Users/amit.benbenishti/data/shapenet/03001627
   num_points: 4000
   surface_ratio: 0.9
   sigmas: [0.005, 0.02]
