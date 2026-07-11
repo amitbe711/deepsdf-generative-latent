@@ -1,0 +1,72 @@
+# ShapeNet chairs: N=50, D=16/32, gaussian + gmm + ddpm.
+# Practical Colab run on real meshes (~1-2 hr build + train on GPU with /content copy).
+#
+#   python scripts/run_grid.py --config configs/shapenet_overnight_n50.yaml \
+#       --output /content/drive/MyDrive/deepsdf_generative/outputs/shapenet_overnight_n50 \
+#       --only-D 16
+seed: 0
+device: cuda
+
+data:
+  source: mesh_dir
+  mesh_dir: /content/shapenet/03001627
+  num_points: 8000
+  surface_ratio: 0.9
+  sigmas: [0.005, 0.02]
+  num_surface_points: 2048
+  mesh_resolution: 48
+
+decoder:
+  hidden_dim: 512
+  num_layers: 8
+  skip_in: [4]
+  dropout_prob: 0.1
+  use_weight_norm: true
+  use_tanh: true
+  geometric_init: true
+  init_radius: 0.5
+
+stage1:
+  num_iters: 4000
+  shapes_per_batch: 16
+  points_per_shape: 1024
+  lr_decoder: 1.0e-3
+  lr_codes: 1.0e-3
+  clamp_delta: 0.1
+  code_init_std: 0.01
+  code_reg_lambda: 1.0e-4
+
+gaussian:
+  covariance: full
+  reg: 1.0e-5
+
+gmm:
+  num_components: 5
+  reg: 1.0e-5
+  max_iters: 200
+  min_points_per_component: 5
+
+ddpm:
+  num_timesteps: 200
+  beta_start: 1.0e-4
+  beta_end: 0.02
+  schedule: cosine
+  hidden_dim: 256
+  num_layers: 4
+  time_embed_dim: 64
+  lr: 1.0e-3
+  num_iters: 3000
+  batch_size: 64
+
+eval:
+  num_generated: 50
+  num_reference: 50
+  surface_points: 2048
+  recon_resolution: 48
+  iou_resolution: 32
+  max_recon_shapes: 20
+
+grid:
+  N: [50]
+  D: [16, 32]
+  generators: [gaussian, gmm, ddpm]
