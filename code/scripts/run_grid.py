@@ -174,7 +174,9 @@ def run_cell(
     t0 = time.time()
 
     with Phase("build training shapes", prefix=tag):
-        collection = build_shape_collection(cfg, num_shapes)
+        collection = build_shape_collection(
+            cfg, num_shapes, verbose=verbose, prefix=tag
+        )
         dataset = ShapeSDFDataset(collection)
         status(
             f"loaded {dataset.num_shapes} shapes (source={cfg.data.source})",

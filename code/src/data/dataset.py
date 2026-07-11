@@ -22,6 +22,7 @@ import trimesh
 from .normalize import normalize_mesh_to_unit_sphere
 from .sdf_sampling import sample_sdf_from_mesh, sample_surface_points
 from .synthetic import AnalyticShape, make_synthetic_collection
+from ..utils.log import status
 
 _MESH_EXTENSIONS = (".obj", ".off", ".ply", ".stl", ".glb")
 
@@ -108,7 +109,11 @@ def _load_meshes_from_dir(path: Path, limit: int | None) -> list[trimesh.Trimesh
 
 
 def build_shape_collection(
-    cfg: Any, num_shapes: int, offset: int = 0
+    cfg: Any,
+    num_shapes: int,
+    offset: int = 0,
+    verbose: bool = False,
+    prefix: str | None = None,
 ) -> list[dict[str, Any]]:
     """Construct ``num_shapes`` preprocessed shapes according to ``cfg.data``.
 
@@ -148,7 +153,16 @@ def build_shape_collection(
                 f"in {data_cfg.mesh_dir}."
             )
         meshes = meshes[offset:end]
-        for mesh in meshes:
+        if verbose:
+            status(
+                f"SDF-sampling {len(meshes)} meshes from {data_cfg.mesh_dir} "
+                f"({num_points} pts/shape; ~2-5 min/mesh from Drive)",
+                prefix=prefix,
+            )
+        import time as _time
+
+        for i, mesh in enumerate(meshes):
+            t_mesh = _time.time()
             collection.append(
                 _samples_from_mesh(
                     mesh,
@@ -159,6 +173,11 @@ def build_shape_collection(
                     rng=rng,
                 )
             )
+            if verbose:
+                status(
+                    f"mesh {i + 1}/{len(meshes)} sampled ({_time.time() - t_mesh:.1f}s)",
+                    prefix=prefix,
+                )
     else:
         raise ValueError(f"Unknown data source: {source!r}")
 

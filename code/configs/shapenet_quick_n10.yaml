@@ -1,0 +1,72 @@
+# ShapeNet quick validation: N=10, D=16, all generators.
+# ~15-40 min total if meshes are on /content (not Drive).
+# Proves real-chair pipeline before a longer N=50 run.
+#
+#   python scripts/run_grid.py --config configs/shapenet_quick_n10.yaml \
+#       --output outputs/shapenet_quick_n10 --only-D 16
+seed: 0
+device: cuda
+
+data:
+  source: mesh_dir
+  mesh_dir: /content/shapenet/03001627
+  num_points: 4000
+  surface_ratio: 0.9
+  sigmas: [0.005, 0.02]
+  num_surface_points: 1024
+  mesh_resolution: 40
+
+decoder:
+  hidden_dim: 256
+  num_layers: 8
+  skip_in: [4]
+  dropout_prob: 0.0
+  use_weight_norm: true
+  use_tanh: true
+  geometric_init: true
+  init_radius: 0.5
+
+stage1:
+  num_iters: 2000
+  shapes_per_batch: 8
+  points_per_shape: 512
+  lr_decoder: 1.0e-3
+  lr_codes: 1.0e-3
+  clamp_delta: 0.1
+  code_init_std: 0.01
+  code_reg_lambda: 1.0e-4
+
+gaussian:
+  covariance: full
+  reg: 1.0e-5
+
+gmm:
+  num_components: 3
+  reg: 1.0e-5
+  max_iters: 100
+  min_points_per_component: 3
+
+ddpm:
+  num_timesteps: 100
+  beta_start: 1.0e-4
+  beta_end: 0.02
+  schedule: cosine
+  hidden_dim: 128
+  num_layers: 3
+  time_embed_dim: 32
+  lr: 1.0e-3
+  num_iters: 1500
+  batch_size: 32
+
+eval:
+  num_generated: 20
+  num_reference: 20
+  surface_points: 1024
+  recon_resolution: 40
+  iou_resolution: 24
+  max_recon_shapes: 10
+
+grid:
+  N: [10]
+  D: [16]
+  generators: [gaussian, gmm, ddpm]
