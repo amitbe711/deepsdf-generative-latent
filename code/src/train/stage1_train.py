@@ -100,9 +100,11 @@ def train_stage1(
             }
             history.append(row)
             if verbose:
+                z_norm = float(torch.mean(torch.norm(z, dim=-1)).item())
                 status(
                     f"stage1 {int(step) + 1}/{num_iters} "
-                    f"loss={row['loss']:.4f} recon={row['recon']:.4f} reg={row['reg']:.6f}",
+                    f"loss={row['loss']:.4f} recon={row['recon']:.4f} reg={row['reg']:.6f} "
+                    f"|z|={z_norm:.4f}",
                     prefix=prefix,
                 )
 

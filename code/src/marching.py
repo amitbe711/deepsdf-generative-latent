@@ -37,13 +37,18 @@ def sdf_grid_to_mesh(
     volume: np.ndarray, bound: float = 1.0, level: float = 0.0
 ) -> trimesh.Trimesh | None:
     """Marching Cubes on an SDF volume. Returns ``None`` if no surface is found."""
-    if volume.min() > level or volume.max() < level:
-        return None
-    resolution = volume.shape[0]
+    vol = np.nan_to_num(volume, nan=0.0, posinf=1.0, neginf=-1.0)
+    if vol.min() > level or vol.max() < level:
+        # Under-trained / offset fields may not cross exactly 0; use the value
+        # in the grid closest to zero (common with clamped-L1 + few real meshes).
+        level = float(vol.flat[np.argmin(np.abs(vol))])
+        if vol.min() == vol.max():
+            return None
+    resolution = vol.shape[0]
     spacing = (2.0 * bound) / (resolution - 1)
     try:
         verts, faces, normals, _ = measure.marching_cubes(
-            volume, level=level, spacing=(spacing, spacing, spacing)
+            vol, level=level, spacing=(spacing, spacing, spacing)
         )
     except (ValueError, RuntimeError):
         return None

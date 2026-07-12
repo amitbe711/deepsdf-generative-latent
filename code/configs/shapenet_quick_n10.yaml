@@ -31,10 +31,10 @@ stage1:
   shapes_per_batch: 8
   points_per_shape: 512
   lr_decoder: 1.0e-3
-  lr_codes: 1.0e-3
+  lr_codes: 5.0e-3
   clamp_delta: 0.1
-  code_init_std: 0.05      # stronger codes (avoid collapse to ~0)
-  code_reg_lambda: 1.0e-5  # weaker reg than 1e-4 for small N on real meshes
+  code_init_std: 0.1
+  code_reg_lambda: 0.0
 
 gaussian:
   covariance: full
