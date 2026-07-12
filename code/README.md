@@ -78,10 +78,31 @@ Outputs per grid cell (`outputs/<run>/N{N}_D{D}/`):
 4. Quick sanity check (1 mesh): `python scripts/run_grid.py --config configs/shapenet_smoke.yaml --output outputs/shapenet_smoke`
 5. Full grid: `python scripts/run_grid.py --config configs/shapenet.yaml --output outputs/shapenet`
 
-**Hugging Face** (after login): `huggingface-cli login`, then download
+**Hugging Face** (after login): `hf auth login`, then download
 `ShapeNet/ShapeNetCore` file `03001627.zip` and unzip. Training uses the first
 `N` meshes; generation metrics use the next `num_reference` meshes as a held-out
 set (falls back to synthetic chairs if there are not enough).
+
+### Databricks (GPU job)
+
+Import `notebooks/databricks_driver.py` as a Databricks notebook (or sync from
+GitHub). It mirrors the Colab flow:
+
+1. Download chairs from Hugging Face **once** → persist on S3
+2. Copy a subset to `/local_disk0` for fast mesh SDF sampling
+3. Run `run_grid.py` → upload metrics/checkpoints to S3
+
+Default S3 prefix (edit in the notebook if needed):
+
+```
+s3://sw-dmi-data-staging/users/amit.benbenishti/others/3d_project/
+  data/shapenet/03001627/          # chairs (after first HF download)
+  outputs/shapenet_quick_n10/      # run outputs
+```
+
+**Setup:** create secret scope `hf` with key `token` (Read token). Use a
+single-node GPU cluster. For a quick real-mesh validation, set
+`RUN_CONFIG = configs/shapenet_quick_n10.yaml` and `MESHES_FOR_RUN = 60`.
 
 ## Metrics
 
@@ -102,7 +123,7 @@ src/
   sample.py    latent code -> SDF volume -> mesh / point cloud
   thirdparty/  (empty) see its README for the own-vs-borrowed accounting
 scripts/       run_grid.py, make_figures.py, prepare_data.py
-notebooks/     colab_driver.ipynb
+notebooks/     colab_driver.ipynb, databricks_driver.py
 tests/         sanity checks (overfit, ddpm, metrics, sdf sampling)
 ```
 

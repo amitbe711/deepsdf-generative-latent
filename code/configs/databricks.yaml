@@ -1,0 +1,27 @@
+# Databricks + S3 paths for ShapeNet runs.
+# Used by notebooks/databricks_driver.py — same logic as Colab, persistent storage on S3.
+
+s3_base: s3://sw-dmi-data-staging/users/amit.benbenishti/others/3d_project
+
+paths:
+  shapenet_zip: ${s3_base}/data/shapenet/03001627.zip
+  shapenet_dir: ${s3_base}/data/shapenet/03001627
+  outputs: ${s3_base}/outputs
+
+local:
+  base: /local_disk0/3d_project
+  shapenet: /local_disk0/3d_project/shapenet/03001627
+  outputs: /local_disk0/3d_project/outputs
+
+# Suggested runs (GPU cluster)
+runs:
+  quick:
+    config: configs/shapenet_quick_n10.yaml
+    output_name: shapenet_quick_n10
+    meshes_for_run: 60
+    only_d: "16"
+  overnight_n50:
+    config: configs/shapenet_overnight_n50.yaml
+    output_name: shapenet_overnight_n50
+    meshes_for_run: 100
+    only_d: "16"
