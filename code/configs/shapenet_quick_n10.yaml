@@ -17,24 +17,24 @@ data:
   mesh_resolution: 40
 
 decoder:
-  hidden_dim: 256
+  hidden_dim: 512
   num_layers: 8
   skip_in: [4]
   dropout_prob: 0.0
   use_weight_norm: true
-  use_tanh: true
+  use_tanh: false          # tanh can prevent a zero level-set on the eval grid
   geometric_init: true
   init_radius: 0.5
 
 stage1:
-  num_iters: 2000
+  num_iters: 6000
   shapes_per_batch: 8
   points_per_shape: 512
   lr_decoder: 1.0e-3
   lr_codes: 1.0e-3
   clamp_delta: 0.1
-  code_init_std: 0.01
-  code_reg_lambda: 1.0e-4
+  code_init_std: 0.05      # stronger codes (avoid collapse to ~0)
+  code_reg_lambda: 1.0e-5  # weaker reg than 1e-4 for small N on real meshes
 
 gaussian:
   covariance: full
@@ -62,8 +62,8 @@ eval:
   num_generated: 20
   num_reference: 20
   surface_points: 1024
-  recon_resolution: 40
-  iou_resolution: 24
+  recon_resolution: 64
+  iou_resolution: 32
   max_recon_shapes: 10
 
 grid:
