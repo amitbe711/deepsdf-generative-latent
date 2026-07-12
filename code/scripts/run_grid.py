@@ -95,11 +95,16 @@ def evaluate_reconstruction(
         z = codes.embedding.weight[i].detach()
         pred_mesh = decode_mesh(decoder, z, resolution=res, device=device)
         if pred_mesh is None or len(pred_mesh.faces) == 0:
+            if device == "cuda":
+                torch.cuda.empty_cache()
             continue
         pred_pc = sample_surface_points(pred_mesh, n_pts)
         cds.append(chamfer_distance(pred_pc, surface[i]))
         if meshes[i] is not None:
             ious.append(iou_from_meshes(pred_mesh, meshes[i], resolution=iou_res))
+        del pred_mesh, pred_pc
+        if device == "cuda":
+            torch.cuda.empty_cache()
     return {
         "chamfer": float(np.mean(cds)) if cds else float("nan"),
         "iou": float(np.mean(ious)) if ious else float("nan"),
@@ -135,6 +140,8 @@ def evaluate_generator(
         )
         if pc is not None:
             gen_clouds.append(pc)
+        if device == "cuda":
+            torch.cuda.empty_cache()
 
     valid_ratio = len(gen_clouds) / max(num_gen, 1)
     if len(gen_clouds) == 0:
@@ -194,6 +201,15 @@ def run_cell(
             prefix=tag,
         )
     decoder, codes = stage1["decoder"], stage1["codes"]
+
+    # Drop full meshes from RAM — only surface tensors + optional GT for IoU are needed.
+    for item in dataset.collection:
+        item["mesh"] = None
+    import gc
+
+    gc.collect()
+    if device == "cuda":
+        torch.cuda.empty_cache()
 
     with Phase("reconstruction metrics", prefix=tag):
         recon = evaluate_reconstruction(

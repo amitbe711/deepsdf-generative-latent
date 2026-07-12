@@ -210,13 +210,19 @@ def setup_repo() -> Path:
     subprocess.check_call(
         [sys.executable, "-m", "pip", "install", "-q", "-r", str(code_dir / "requirements.txt")]
     )
+    # Keep numpy 1.x on Databricks ML runtimes (avoids pip pulling numpy 2.x).
+    subprocess.check_call(
+        [sys.executable, "-m", "pip", "install", "-q", "numpy>=1.24,<2"],
+    )
     return code_dir
 
 
 def apply_stability_patches(cfg: dict) -> dict:
-    """Databricks-friendly defaults for real-mesh decode stability."""
+    """Databricks-friendly defaults: less memory during decode."""
     dec = cfg.setdefault("decoder", {})
     dec["use_tanh"] = False
+    if int(dec.get("hidden_dim", 512)) > 256:
+        dec["hidden_dim"] = 256
 
     s1 = cfg.setdefault("stage1", {})
     s1["code_reg_lambda"] = float(s1.get("code_reg_lambda", 0.0) or 0.0)
@@ -224,6 +230,8 @@ def apply_stability_patches(cfg: dict) -> dict:
 
     ev = cfg.setdefault("eval", {})
     ev["recon_resolution"] = min(int(ev.get("recon_resolution", 48)), RECON_RESOLUTION_CAP)
+    ev["max_recon_shapes"] = min(int(ev.get("max_recon_shapes", 20)), 8)
+    ev["num_generated"] = min(int(ev.get("num_generated", 50)), 20)
     return cfg
 
 
@@ -236,6 +244,8 @@ def patch_config(config_path: Path, mesh_dir: Path, out_yaml: Path) -> Path:
     out_yaml.write_text(yaml.dump(cfg))
     print("Patched config ->", out_yaml)
     print("  recon_resolution:", cfg["eval"]["recon_resolution"])
+    print("  max_recon_shapes:", cfg["eval"]["max_recon_shapes"])
+    print("  hidden_dim:", cfg["decoder"]["hidden_dim"])
     print("  use_tanh:", cfg["decoder"]["use_tanh"])
     return out_yaml
 
