@@ -85,24 +85,25 @@ set (falls back to synthetic chairs if there are not enough).
 
 ### Databricks (GPU job)
 
-Import `notebooks/databricks_driver.py` as a Databricks notebook (or sync from
-GitHub). It mirrors the Colab flow:
+Import `notebooks/databricks_driver.py` as a Databricks notebook. It mirrors the Colab flow:
 
-1. Download chairs from Hugging Face **once** → persist on S3
-2. Copy a subset to `/local_disk0` for fast mesh SDF sampling
-3. Run `run_grid.py` → upload metrics/checkpoints to S3
+1. Download chairs from Hugging Face **once** → persist zip on S3
+2. Extract `N + reference + 10` meshes to `/local_disk0`
+3. Preflight → `run_grid.py` → upload **outputs + logs** to S3
 
-Default S3 prefix (edit in the notebook if needed):
+**Cluster:** on-demand `g5.8xlarge` (A10G) recommended; avoid spot for long runs.
+**Job:** run as a Databricks Job so cluster restarts / disconnects are less likely.
+
+Default S3 prefix:
 
 ```
 s3://sw-dmi-data-staging/users/amit.benbenishti/others/3d_project/
-  data/shapenet/03001627/          # chairs (after first HF download)
-  outputs/shapenet_quick_n10/      # run outputs
+  data/shapenet/03001627.zip
+  outputs/shapenet_overnight_n50/
+  logs/shapenet_overnight_n50_<timestamp>.log
 ```
 
-**Setup:** create secret scope `hf` with key `token` (Read token). Use a
-single-node GPU cluster. For a quick real-mesh validation, set
-`RUN_CONFIG = configs/shapenet_quick_n10.yaml` and `MESHES_FOR_RUN = 60`.
+Notebook widgets: `run_config`, `output_name`, `only_d`, `meshes_for_run`, `recon_cap`.
 
 ## Metrics
 
