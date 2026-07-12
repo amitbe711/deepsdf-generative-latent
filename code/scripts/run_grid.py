@@ -202,9 +202,11 @@ def run_cell(
         )
     decoder, codes = stage1["decoder"], stage1["codes"]
 
-    # Drop full meshes from RAM — only surface tensors + optional GT for IoU are needed.
-    for item in dataset.collection:
-        item["mesh"] = None
+    # Free full meshes for non-eval shapes (50 chair meshes ≈ GBs of RAM).
+    max_recon = min(int(cfg.eval.max_recon_shapes), dataset.num_shapes)
+    for i, item in enumerate(dataset.collection):
+        if i >= max_recon:
+            item["mesh"] = None
     import gc
 
     gc.collect()
