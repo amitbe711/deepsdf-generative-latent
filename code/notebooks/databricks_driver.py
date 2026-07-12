@@ -2,7 +2,9 @@
 # MAGIC %md
 # MAGIC # DeepSDF generative latent — Databricks driver
 # MAGIC
-# MAGIC **Recommended:** run as a **Job** on an **on-demand** `g5.8xlarge` (A10G) — not spot.
+# MAGIC **Recommended:** run as a **Job** on an **on-demand** `g5.8xlarge` (A10G) — **not spot**.
+# MAGIC If the cluster dies during reconstruction, restart it (Terminated → new cluster) and re-run;
+# MAGIC training data is cached on `/local_disk0` when the same cluster is reused.
 # MAGIC
 # MAGIC Flow:
 # MAGIC 1. ShapeNet zip on **S3** (HF download once)
@@ -50,7 +52,7 @@ OUTPUT_NAME = "shapenet_overnight_n50"
 ONLY_D = "16"
 ONLY_N = ""
 MESHES_FOR_RUN = 0  # 0 = auto from config (N + reference + 10)
-RECON_RESOLUTION_CAP = 40  # lower = less RAM / GPU pressure during decode
+RECON_RESOLUTION_CAP = 32  # lower = less RAM / GPU pressure during decode
 
 # COMMAND ----------
 
@@ -230,8 +232,11 @@ def apply_stability_patches(cfg: dict) -> dict:
 
     ev = cfg.setdefault("eval", {})
     ev["recon_resolution"] = min(int(ev.get("recon_resolution", 48)), RECON_RESOLUTION_CAP)
-    ev["max_recon_shapes"] = min(int(ev.get("max_recon_shapes", 20)), 8)
-    ev["num_generated"] = min(int(ev.get("num_generated", 50)), 20)
+    ev["max_recon_shapes"] = min(int(ev.get("max_recon_shapes", 20)), 5)
+    ev["num_generated"] = min(int(ev.get("num_generated", 50)), 15)
+    ev["num_reference"] = min(int(ev.get("num_reference", 50)), 20)
+    ev["decode_device"] = "cpu"  # frees GPU VRAM; avoids dual-process OOM on driver+worker
+    ev["skip_iou"] = True  # mesh.contains() on chairs is RAM-heavy
     return cfg
 
 
@@ -245,6 +250,9 @@ def patch_config(config_path: Path, mesh_dir: Path, out_yaml: Path) -> Path:
     print("Patched config ->", out_yaml)
     print("  recon_resolution:", cfg["eval"]["recon_resolution"])
     print("  max_recon_shapes:", cfg["eval"]["max_recon_shapes"])
+    print("  num_reference:", cfg["eval"]["num_reference"])
+    print("  decode_device:", cfg["eval"]["decode_device"])
+    print("  skip_iou:", cfg["eval"]["skip_iou"])
     print("  hidden_dim:", cfg["decoder"]["hidden_dim"])
     print("  use_tanh:", cfg["decoder"]["use_tanh"])
     return out_yaml
@@ -267,35 +275,43 @@ def run_preflight(code_dir: Path, mesh_dir: Path) -> None:
 
 
 def run_grid_logged(code_dir: Path, config_path: Path, output_dir: Path) -> None:
+    """Run grid in the notebook process (one CUDA context — avoids driver OOM)."""
+    import runpy
+
     output_dir.mkdir(parents=True, exist_ok=True)
-    cmd = [
-        sys.executable,
-        "scripts/run_grid.py",
+    argv = [
+        "run_grid.py",
         "--config",
         str(config_path),
         "--output",
         str(output_dir),
     ]
     if ONLY_D:
-        cmd += ["--only-D", ONLY_D]
+        argv += ["--only-D", ONLY_D]
     if ONLY_N:
-        cmd += ["--only-N", ONLY_N]
-    print("Running:", " ".join(cmd), flush=True)
+        argv += ["--only-N", ONLY_N]
+    print("Running in-process:", " ".join(argv), flush=True)
 
-    proc = subprocess.Popen(
-        cmd,
-        cwd=str(code_dir),
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        bufsize=1,
+    old_argv = sys.argv
+    old_cwd = os.getcwd()
+    try:
+        sys.argv = argv
+        os.chdir(code_dir)
+        runpy.run_path(str(code_dir / "scripts" / "run_grid.py"), run_name="__main__")
+    finally:
+        sys.argv = old_argv
+        os.chdir(old_cwd)
+
+
+def check_cuda_subprocess() -> None:
+    subprocess.check_call(
+        [
+            sys.executable,
+            "-c",
+            "import torch; ok=torch.cuda.is_available(); "
+            "print('CUDA:', ok, torch.cuda.get_device_name(0) if ok else '(no GPU)')",
+        ]
     )
-    assert proc.stdout is not None
-    for line in proc.stdout:
-        print(line, end="", flush=True)
-    rc = proc.wait()
-    if rc != 0:
-        raise subprocess.CalledProcessError(rc, cmd)
 
 
 def upload_outputs(local_output: Path, s3_output: str) -> None:
@@ -338,12 +354,7 @@ s3_out = f"{S3_OUTPUTS}/{OUTPUT_NAME}"
 run_yaml = LOCAL_BASE / "run_config.yaml"
 
 try:
-    import torch
-    print("CUDA:", torch.cuda.is_available(), end=" ")
-    if torch.cuda.is_available():
-        print(torch.cuda.get_device_name(0))
-    else:
-        print("(no GPU — use a GPU cluster)")
+    check_cuda_subprocess()
 
     ensure_shapenet_zip_on_s3()
     upload_log()

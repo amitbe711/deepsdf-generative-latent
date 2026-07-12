@@ -54,7 +54,8 @@ def build_reference_clouds(
     """Held-out shapes used as the reference distribution for generation metrics."""
     if cfg.data.source == "mesh_dir":
         mesh_dir = Path(cfg.data.mesh_dir)
-        meshes = _load_meshes_from_dir(mesh_dir, limit=None)
+        need = train_count + num_reference
+        meshes = _load_meshes_from_dir(mesh_dir, limit=need)
         ref_meshes = meshes[train_count : train_count + num_reference]
         if len(ref_meshes) >= num_reference:
             return [
@@ -74,9 +75,25 @@ def build_reference_clouds(
     return clouds
 
 
+def _decode_device(cfg, train_device: str) -> str:
+    requested = getattr(cfg.eval, "decode_device", None)
+    if requested:
+        return resolve_device(str(requested))
+    return train_device
+
+
 def evaluate_reconstruction(
-    cfg, decoder, codes, dataset, device, *, prefix: str | None = None, verbose: bool = False
+    cfg,
+    decoder,
+    codes,
+    dataset,
+    device,
+    *,
+    decode_device: str | None = None,
+    prefix: str | None = None,
+    verbose: bool = False,
 ) -> dict[str, float]:
+    decode_device = decode_device or _decode_device(cfg, device)
     max_shapes = min(int(cfg.eval.max_recon_shapes), dataset.num_shapes)
     idxs = list(range(max_shapes))
     surface = dataset.surface_clouds()
@@ -84,26 +101,30 @@ def evaluate_reconstruction(
     res = int(cfg.eval.recon_resolution)
     iou_res = int(cfg.eval.iou_resolution)
     n_pts = int(cfg.eval.surface_points)
+    skip_iou = bool(getattr(cfg.eval, "skip_iou", False))
 
     if verbose:
-        status(f"reconstruction eval on {max_shapes} shapes", prefix=prefix)
+        status(
+            f"reconstruction eval on {max_shapes} shapes (decode={decode_device})",
+            prefix=prefix,
+        )
 
     cds, ious = [], []
     for i in idxs:
         if verbose and (i == 0 or (i + 1) % max(1, max_shapes // 5) == 0 or i == max_shapes - 1):
             status(f"reconstruction {i + 1}/{max_shapes}", prefix=prefix)
         z = codes.embedding.weight[i].detach()
-        pred_mesh = decode_mesh(decoder, z, resolution=res, device=device)
+        pred_mesh = decode_mesh(decoder, z, resolution=res, device=decode_device)
         if pred_mesh is None or len(pred_mesh.faces) == 0:
-            if device == "cuda":
+            if decode_device == "cuda":
                 torch.cuda.empty_cache()
             continue
         pred_pc = sample_surface_points(pred_mesh, n_pts)
         cds.append(chamfer_distance(pred_pc, surface[i]))
-        if meshes[i] is not None:
+        if not skip_iou and meshes[i] is not None:
             ious.append(iou_from_meshes(pred_mesh, meshes[i], resolution=iou_res))
         del pred_mesh, pred_pc
-        if device == "cuda":
+        if decode_device == "cuda":
             torch.cuda.empty_cache()
     return {
         "chamfer": float(np.mean(cds)) if cds else float("nan"),
@@ -119,16 +140,21 @@ def evaluate_generator(
     reference_clouds,
     device,
     *,
+    decode_device: str | None = None,
     prefix: str | None = None,
     verbose: bool = False,
     generator_name: str = "generator",
 ) -> dict[str, float]:
+    decode_device = decode_device or _decode_device(cfg, device)
     num_gen = int(cfg.eval.num_generated)
     res = int(cfg.eval.recon_resolution)
     n_pts = int(cfg.eval.surface_points)
 
     if verbose:
-        status(f"{generator_name}: sampling {num_gen} latents", prefix=prefix)
+        status(
+            f"{generator_name}: sampling {num_gen} latents (decode={decode_device})",
+            prefix=prefix,
+        )
 
     z_samples = sampler_fn(num_gen)
     gen_clouds = []
@@ -136,11 +162,15 @@ def evaluate_generator(
         if verbose and (j == 0 or (j + 1) % max(1, num_gen // 5) == 0 or j == num_gen - 1):
             status(f"{generator_name}: decode {j + 1}/{num_gen}", prefix=prefix)
         pc = decode_point_cloud(
-            decoder, z_samples[j], num_points=n_pts, resolution=res, device=device
+            decoder,
+            z_samples[j],
+            num_points=n_pts,
+            resolution=res,
+            device=decode_device,
         )
         if pc is not None:
             gen_clouds.append(pc)
-        if device == "cuda":
+        if decode_device == "cuda":
             torch.cuda.empty_cache()
 
     valid_ratio = len(gen_clouds) / max(num_gen, 1)
@@ -201,6 +231,7 @@ def run_cell(
             prefix=tag,
         )
     decoder, codes = stage1["decoder"], stage1["codes"]
+    decode_device = _decode_device(cfg, device)
 
     # Free full meshes for non-eval shapes (50 chair meshes ≈ GBs of RAM).
     max_recon = min(int(cfg.eval.max_recon_shapes), dataset.num_shapes)
@@ -213,9 +244,20 @@ def run_cell(
     if device == "cuda":
         torch.cuda.empty_cache()
 
+    if decode_device == "cpu" and device == "cuda":
+        decoder.cpu()
+        torch.cuda.empty_cache()
+
     with Phase("reconstruction metrics", prefix=tag):
         recon = evaluate_reconstruction(
-            cfg, decoder, codes, dataset, device, prefix=tag, verbose=verbose
+            cfg,
+            decoder,
+            codes,
+            dataset,
+            device,
+            decode_device=decode_device,
+            prefix=tag,
+            verbose=verbose,
         )
     status(f"reconstruction: chamfer={recon['chamfer']:.4f} iou={recon['iou']:.3f}", prefix=tag)
 
@@ -249,6 +291,7 @@ def run_cell(
                 lambda n: prior.sample(n, generator=gen),
                 reference,
                 device,
+                decode_device=decode_device,
                 prefix=tag,
                 verbose=verbose,
                 generator_name="gaussian",
@@ -271,6 +314,7 @@ def run_cell(
                 lambda n: gmm.sample(n, generator=gen),
                 reference,
                 device,
+                decode_device=decode_device,
                 prefix=tag,
                 verbose=verbose,
                 generator_name="gmm",
@@ -300,6 +344,7 @@ def run_cell(
                 lambda n: ddpm.sample(n, device=device).cpu(),
                 reference,
                 device,
+                decode_device=decode_device,
                 prefix=tag,
                 verbose=verbose,
                 generator_name="ddpm",
