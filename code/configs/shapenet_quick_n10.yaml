@@ -1,6 +1,5 @@
 # ShapeNet quick validation: N=10, D=16, all generators.
-# ~15-40 min total if meshes are on /content (not Drive).
-# Proves real-chair pipeline before a longer N=50 run.
+# First real-data sanity check before N=50 / full grid.
 #
 #   python scripts/run_grid.py --config configs/shapenet_quick_n10.yaml \
 #       --output outputs/shapenet_quick_n10 --only-D 16
@@ -9,7 +8,7 @@ device: cuda
 
 data:
   source: mesh_dir
-  mesh_dir: /content/shapenet/03001627
+  mesh_dir: /local_disk0/3d_project/shapenet/03001627
   num_points: 4000
   surface_ratio: 0.9
   sigmas: [0.005, 0.02]
@@ -22,7 +21,7 @@ decoder:
   skip_in: [4]
   dropout_prob: 0.0
   use_weight_norm: true
-  use_tanh: false          # tanh can prevent a zero level-set on the eval grid
+  use_tanh: true
   geometric_init: true
   init_radius: 0.5
 
@@ -65,6 +64,7 @@ eval:
   recon_resolution: 64
   iou_resolution: 32
   max_recon_shapes: 10
+  decode_device: cpu
 
 grid:
   N: [10]

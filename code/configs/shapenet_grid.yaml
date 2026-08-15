@@ -1,8 +1,13 @@
-# ShapeNet chairs: N=50, D=16/32, gaussian + gmm + ddpm.
-# Primary real-data run (not synthetic). Databricks: patch_mode=quality.
+# Primary experiment: ShapeNet chairs (synset 03001627), N x D grid.
+# Matches the proposal sweep on real meshes — synthetic configs are smoke-only.
 #
-#   python scripts/run_grid.py --config configs/shapenet_overnight_n50.yaml \
-#       --output outputs/shapenet_overnight_n50 --only-D 16
+# Databricks (g5.8xlarge, patch_mode=quality):
+#   run_config: configs/shapenet_grid.yaml
+#   output_name: shapenet_grid
+#
+# Single cell:
+#   python scripts/run_grid.py --config configs/shapenet_grid.yaml \
+#       --output outputs/shapenet_grid --only-N 50 --only-D 16
 seed: 0
 device: cuda
 
@@ -67,6 +72,6 @@ eval:
   decode_device: cpu
 
 grid:
-  N: [50]
+  N: [10, 50, 150]
   D: [16, 32]
   generators: [gaussian, gmm, ddpm]

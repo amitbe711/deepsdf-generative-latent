@@ -1,6 +1,9 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # DeepSDF generative latent — Databricks driver
+# MAGIC # DeepSDF generative latent — ShapeNet (primary)
+# MAGIC
+# MAGIC **ShapeNet chairs** (`03001627`) are the main experiment. Synthetic configs are
+# MAGIC smoke tests only. Use **`patch_mode=quality`** (default) for reportable results.
 # MAGIC
 # MAGIC **Recommended:** run as a **Job** on an **on-demand** `g5.8xlarge` (A10G) — **not spot**.
 # MAGIC If the cluster dies during reconstruction, restart it (Terminated → new cluster) and re-run;
@@ -52,11 +55,17 @@ OUTPUT_NAME = "shapenet_overnight_n50"
 ONLY_D = "16"
 ONLY_N = ""
 MESHES_FOR_RUN = 0  # 0 = auto from config (N + reference + 10)
-RECON_RESOLUTION_CAP = 32  # lower = less RAM / GPU pressure during decode
+RECON_RESOLUTION_CAP = 48
+PATCH_MODE = "quality"  # quality | stable (stable = old memory-degraded run)
 
 # COMMAND ----------
 
 # Widgets (Databricks UI — optional overrides)
+dbutils.widgets.dropdown(  # noqa: F821
+    "patch_mode",
+    PATCH_MODE,
+    ["quality", "stable"],
+)
 dbutils.widgets.dropdown(  # noqa: F821
     "run_config",
     RUN_CONFIG,
@@ -64,6 +73,7 @@ dbutils.widgets.dropdown(  # noqa: F821
         "configs/shapenet_single_n1.yaml",
         "configs/shapenet_quick_n10.yaml",
         "configs/shapenet_overnight_n50.yaml",
+        "configs/shapenet_grid.yaml",
         "configs/shapenet_overnight_n500.yaml",
     ],
 )
@@ -79,6 +89,7 @@ ONLY_D = dbutils.widgets.get("only_d")  # noqa: F821
 ONLY_N = dbutils.widgets.get("only_n")  # noqa: F821
 MESHES_FOR_RUN = int(dbutils.widgets.get("meshes_for_run"))  # noqa: F821
 RECON_RESOLUTION_CAP = int(dbutils.widgets.get("recon_cap"))  # noqa: F821
+PATCH_MODE = dbutils.widgets.get("patch_mode")  # noqa: F821
 
 RUN_TS = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
 LOCAL_LOG = LOCAL_BASE / "logs" / f"{OUTPUT_NAME}_{RUN_TS}.log"
@@ -219,24 +230,34 @@ def setup_repo() -> Path:
     return code_dir
 
 
-def apply_stability_patches(cfg: dict) -> dict:
-    """Databricks-friendly defaults: less memory during decode."""
-    dec = cfg.setdefault("decoder", {})
-    dec["use_tanh"] = False
-    if int(dec.get("hidden_dim", 512)) > 256:
-        dec["hidden_dim"] = 256
+def apply_stability_patches(cfg: dict, mode: str = "quality") -> dict:
+    """Memory-safe eval settings without destroying decode quality.
 
-    s1 = cfg.setdefault("stage1", {})
-    s1["code_reg_lambda"] = float(s1.get("code_reg_lambda", 0.0) or 0.0)
-    s1["lr_codes"] = max(float(s1.get("lr_codes", 1e-3)), 5e-3)
-
+    ``quality`` (default): keep full decoder + tanh; CPU decode + capped recon count.
+    ``stable``: legacy degraded run (hidden_dim 256, no tanh) if cluster still OOMs.
+    """
     ev = cfg.setdefault("eval", {})
     ev["recon_resolution"] = min(int(ev.get("recon_resolution", 48)), RECON_RESOLUTION_CAP)
-    ev["max_recon_shapes"] = min(int(ev.get("max_recon_shapes", 20)), 5)
-    ev["num_generated"] = min(int(ev.get("num_generated", 50)), 15)
-    ev["num_reference"] = min(int(ev.get("num_reference", 50)), 20)
-    ev["decode_device"] = "cpu"  # frees GPU VRAM; avoids dual-process OOM on driver+worker
-    ev["skip_iou"] = True  # mesh.contains() on chairs is RAM-heavy
+    ev.setdefault("decode_device", "cpu")
+
+    if mode == "stable":
+        dec = cfg.setdefault("decoder", {})
+        dec["use_tanh"] = False
+        if int(dec.get("hidden_dim", 512)) > 256:
+            dec["hidden_dim"] = 256
+        s1 = cfg.setdefault("stage1", {})
+        s1["lr_codes"] = max(float(s1.get("lr_codes", 1e-3)), 5e-3)
+        ev["max_recon_shapes"] = min(int(ev.get("max_recon_shapes", 20)), 5)
+        ev["num_generated"] = min(int(ev.get("num_generated", 50)), 15)
+        ev["num_reference"] = min(int(ev.get("num_reference", 50)), 20)
+        ev["skip_iou"] = True
+        return cfg
+
+    # quality mode — only trim eval memory, not training architecture
+    ev["max_recon_shapes"] = min(int(ev.get("max_recon_shapes", 20)), 10)
+    ev["num_generated"] = min(int(ev.get("num_generated", 50)), 40)
+    ev["num_reference"] = min(int(ev.get("num_reference", 50)), 40)
+    ev.pop("skip_iou", None)
     return cfg
 
 
@@ -245,14 +266,14 @@ def patch_config(config_path: Path, mesh_dir: Path, out_yaml: Path) -> Path:
     cfg["data"]["source"] = "mesh_dir"
     cfg["data"]["mesh_dir"] = str(mesh_dir)
     cfg["device"] = "cuda"
-    cfg = apply_stability_patches(cfg)
+    cfg = apply_stability_patches(cfg, mode=PATCH_MODE)
     out_yaml.write_text(yaml.dump(cfg))
     print("Patched config ->", out_yaml)
+    print("  patch_mode:", PATCH_MODE)
     print("  recon_resolution:", cfg["eval"]["recon_resolution"])
     print("  max_recon_shapes:", cfg["eval"]["max_recon_shapes"])
     print("  num_reference:", cfg["eval"]["num_reference"])
     print("  decode_device:", cfg["eval"]["decode_device"])
-    print("  skip_iou:", cfg["eval"]["skip_iou"])
     print("  hidden_dim:", cfg["decoder"]["hidden_dim"])
     print("  use_tanh:", cfg["decoder"]["use_tanh"])
     return out_yaml
