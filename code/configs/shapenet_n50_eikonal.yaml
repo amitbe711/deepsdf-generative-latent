@@ -39,11 +39,15 @@ stage1:
   clamp_delta: 0.1
   code_init_std: 0.01
   code_reg_lambda: 1.0e-4
-  # New: IGR-style Eikonal weight (Gropp et al., 2020). 0.1 is a common
-  # starting point in the literature; tune down if it fights recon loss too
-  # hard (recon plateauing above baseline), tune up if decodes are still
-  # incoherent/blobby despite low recon loss.
-  eikonal_lambda: 0.1
+  # IGR-style Eikonal weight (Gropp et al., 2020). 0.1 is the literature
+  # default, but that's calibrated against an *unclamped* data loss of O(1)
+  # scale -- here `recon` is clamped to +/-0.1 (clamp_delta), so it's ~10x
+  # smaller than eikonal's naturally O(1) scale. At lambda=0.1 eikonal totally
+  # dominated the objective (0.1*eik~0.85 = 0.085 >> recon~0.007) and collapsed
+  # to a degenerate, near-z-independent field that never went negative inside
+  # the eval cube (0/120 decodes valid). Scale lambda down by ~clamp_delta so
+  # eikonal acts as a regularizer, not the dominant term.
+  eikonal_lambda: 0.01
 
 gaussian:
   covariance: full

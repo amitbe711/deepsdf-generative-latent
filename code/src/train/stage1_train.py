@@ -14,6 +14,17 @@ can behave arbitrarily, producing spurious zero-crossings or blob-like
 surfaces once resolved on a dense marching-cubes grid. Opt-in via
 ``stage1.eikonal_lambda`` (default 0.0 — off, matching all existing validated
 configs) since it costs a second backward pass (double the memory/time).
+
+CAUTION on ``eikonal_lambda`` scale: with clamped-L1, ``recon`` is bounded by
+``clamp_delta`` (tiny, e.g. O(1e-2) at delta=0.1), while ``eikonal_loss`` is
+unclamped and naturally O(1). The literature default of 0.1 (Gropp et al.)
+assumes an unclamped data loss of comparable O(1) scale; applied here it can
+make the eikonal term dominate the total loss by ~10x, collapsing the field
+to a degenerate near-z-independent solution with no zero level set inside the
+eval cube (eikonal's trivial minimizers are not unique/anchored to the actual
+shape). Scale ``eikonal_lambda`` down roughly by ``clamp_delta`` (e.g. 0.01)
+so it regularizes rather than dominates, and watch that ``eik`` in the logs
+actually trends down over training rather than plateauing high immediately.
 """
 
 from __future__ import annotations
