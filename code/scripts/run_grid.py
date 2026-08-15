@@ -260,6 +260,14 @@ def run_cell(
             verbose=verbose,
         )
     status(f"reconstruction: chamfer={recon['chamfer']:.4f} iou={recon['iou']:.3f}", prefix=tag)
+    if stage1["history"]:
+        final_loss = stage1["history"][-1]["loss"]
+        if final_loss > 0.02:
+            status(
+                f"WARN: stage-1 loss={final_loss:.4f} is high — decodes may fail; "
+                "check code_init_std / code_reg_lambda / num_iters",
+                prefix=tag,
+            )
 
     with Phase("reference set", prefix=tag):
         reference = build_reference_clouds(
