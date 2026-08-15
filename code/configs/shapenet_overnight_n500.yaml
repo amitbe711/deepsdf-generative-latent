@@ -36,7 +36,10 @@ decoder:
 
 stage1:
   num_iters: 6000
-  shapes_per_batch: 16
+  # 160/500 = 32% coverage per iter, matching the validated N=50 run (16/50 = 32%).
+  # See shapenet_grid.yaml: at N=150 with shapes_per_batch=16 (only 11% coverage),
+  # per-shape training exposure was too low and reconstruction/generation regressed.
+  shapes_per_batch: 160
   points_per_shape: 1024
   lr_decoder: 1.0e-3
   lr_codes: 1.0e-3
