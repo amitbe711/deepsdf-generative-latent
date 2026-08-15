@@ -107,5 +107,11 @@ def train_stage1(
                     f"|z|={z_norm:.4f}",
                     prefix=prefix,
                 )
+                if step >= 400 and z_norm < 0.05:
+                    status(
+                        "WARN: |z| collapsing — codes near zero; "
+                        "try use_tanh: false and lr_codes <= lr_decoder",
+                        prefix=prefix,
+                    )
 
     return {"decoder": decoder, "codes": codes, "history": history}
