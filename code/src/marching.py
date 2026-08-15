@@ -33,17 +33,30 @@ def eval_sdf_on_grid(
     return values.reshape(resolution, resolution, resolution)
 
 
+def _largest_component(mesh: trimesh.Trimesh) -> trimesh.Trimesh:
+    """Keep only the largest connected component (drops stray noise specks)."""
+    try:
+        parts = mesh.split(only_watertight=False)
+    except (ValueError, IndexError):
+        return mesh
+    if not parts:
+        return mesh
+    return max(parts, key=lambda part: part.area)
+
+
 def sdf_grid_to_mesh(
     volume: np.ndarray, bound: float = 1.0, level: float = 0.0
 ) -> trimesh.Trimesh | None:
-    """Marching Cubes on an SDF volume. Returns ``None`` if no surface is found."""
+    """Marching Cubes on an SDF volume. Returns ``None`` if no surface is found.
+
+    If the field never actually crosses ``level`` (under-trained decoder, or a
+    latent that decodes to a degenerate blob), we report failure rather than
+    fabricating an isosurface at whatever value happens to be closest to zero
+    — that fallback used to mask garbage tiny fragments as "valid" meshes.
+    """
     vol = np.nan_to_num(volume, nan=0.0, posinf=1.0, neginf=-1.0)
     if vol.min() > level or vol.max() < level:
-        # Under-trained / offset fields may not cross exactly 0; use the value
-        # in the grid closest to zero (common with clamped-L1 + few real meshes).
-        level = float(vol.flat[np.argmin(np.abs(vol))])
-        if vol.min() == vol.max():
-            return None
+        return None
     resolution = vol.shape[0]
     spacing = (2.0 * bound) / (resolution - 1)
     try:
@@ -53,7 +66,8 @@ def sdf_grid_to_mesh(
     except (ValueError, RuntimeError):
         return None
     verts = verts - bound  # shift origin to the cube center
-    return trimesh.Trimesh(vertices=verts, faces=faces, vertex_normals=normals)
+    mesh = trimesh.Trimesh(vertices=verts, faces=faces, vertex_normals=normals)
+    return _largest_component(mesh)
 
 
 def mesh_from_sdf_fn(

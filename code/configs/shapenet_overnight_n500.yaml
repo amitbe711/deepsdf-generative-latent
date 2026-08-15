@@ -19,7 +19,7 @@ data:
   # Colab Drive default; override with env or edit for local runs.
   mesh_dir: /content/shapenet/03001627
   num_points: 8000
-  surface_ratio: 0.9
+  surface_ratio: 0.7   # more far-field samples so the SDF sign is constrained off-surface
   sigmas: [0.005, 0.02]
   num_surface_points: 2048
   mesh_resolution: 48
