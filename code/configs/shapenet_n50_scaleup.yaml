@@ -9,10 +9,29 @@
 # init but was clean with the new init (shapenet_n50_dense.yaml v2: |z| grew
 # to 0.35, recon=0.0043, best pointwise loss yet, though reconstruction
 # chamfer/IoU were still worse than the hidden_dim=256/num_points=8000
-# baseline -- 0.281/0.128 vs 0.129/0.144). This config combines more
-# capacity with the denser sampling and more iterations to actually converge
-# a wider network, to test whether capacity is now genuinely usable instead
-# of another collapse.
+# baseline -- 0.281/0.128 vs 0.129/0.144).
+#
+# UPDATE 2: hidden_dim=512 alone still collapsed |z| even with the first fix
+# (latent-column init std=1e-4) -- verified the decay rate was *identical*
+# to no fix at all (-0.00213 vs -0.00203 per iter).
+#
+# UPDATE 3 (actual root cause, found via local CPU repro on synthetic data):
+# it was NOT a code_reg-vs-recon race at all. Silencing code_reg entirely for
+# the first 300 steps (code_reg_warmup_iters) still gave a collapsing |z| --
+# with `reg` at exactly 0.000000 in the logs the whole time. The real signal:
+# `recon` itself was *flat* the entire run (~0.092, never improving) at
+# hidden_dim=512 with lr_decoder=lr_codes=1e-3, while an identical setup at
+# hidden_dim=256 dropped recon 0.074 -> 0.005 and grew |z| 0.04 -> 0.13 in
+# the same number of steps. The wider network (hidden_dim=512) combined with
+# weight_norm reparameterization was simply optimizer-unstable at this lr --
+# it wasn't learning anything at all, and Adam's per-parameter RMS
+# normalization then walks the untrained, gradient-noise-dominated `z`
+# toward 0 regardless of code_reg. Dropping lr_decoder/lr_codes to 3e-4 (from
+# 1e-3) on an otherwise-identical local repro immediately fixed it: recon
+# 0.073 -> 0.0055 and |z| 0.04 -> 0.08 in 600 steps, matching the healthy
+# hidden_dim=256 trajectory. That's the actual fix below. The larger latent
+# init (std=1e-2) and code_reg_warmup are kept as cheap extra safety margin
+# but were NOT the load-bearing fix.
 #
 #   python scripts/run_grid.py --config configs/shapenet_n50_scaleup.yaml \
 #       --output outputs/shapenet_n50_scaleup --only-D 16
@@ -39,14 +58,15 @@ decoder:
   init_radius: 0.5
 
 stage1:
-  num_iters: 12000           # was 8000 -- wider net + denser data needs more steps to converge
+  num_iters: 16000           # was 8000 -- wider net + denser data + lower lr needs more steps to converge
   shapes_per_batch: 16
   points_per_shape: 2048
-  lr_decoder: 1.0e-3
-  lr_codes: 1.0e-3
+  lr_decoder: 3.0e-4         # was 1e-3 -- too aggressive for hidden_dim=512, caused training to stall
+  lr_codes: 3.0e-4
   clamp_delta: 0.1
   code_init_std: 0.01
   code_reg_lambda: 1.0e-4
+  code_reg_warmup_iters: 2000   # silence code_reg for the critical early bootstrap window
 
 gaussian:
   covariance: full

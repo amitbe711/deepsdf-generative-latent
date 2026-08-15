@@ -88,11 +88,24 @@ class DeepSDFDecoder(nn.Module):
                     # a slow bootstrap of these weights away from zero -- a race
                     # that more decoder capacity/denser data can win, collapsing
                     # |z| to 0 (observed with hidden_dim=512 and denser sampling).
-                    nn.init.normal_(lin.weight.data[:, : self.latent_dim], 0.0, 1e-4)
+                    #
+                    # std=1e-4 was NOT enough at hidden_dim=512 (verified: |z|
+                    # decayed at the *same rate* as the exact-zero init, because
+                    # Adam normalizes step size by each parameter's own gradient
+                    # RMS -- it takes ~lr-sized steps toward whichever direction
+                    # is most *consistent* over time, largely regardless of raw
+                    # gradient magnitude. code_reg_lambda gives a tiny but
+                    # perfectly consistent pull to 0 every step; a too-weak,
+                    # noisy recon signal can't out-compete that consistency even
+                    # if its raw magnitude were comparable. std=1e-2 gives ~100x
+                    # the initial grad norm of 1e-4 while keeping the max output
+                    # perturbation under 1% (0.0085 on outputs of O(1) scale) --
+                    # still an "approximate sphere" start.
+                    nn.init.normal_(lin.weight.data[:, : self.latent_dim], 0.0, 1e-2)
                 if layer in self.skip_in:
                     # Same rationale for the re-injected latent columns at the
                     # skip connection.
-                    nn.init.normal_(lin.weight.data[:, -self.input_dim : -3], 0.0, 1e-4)
+                    nn.init.normal_(lin.weight.data[:, -self.input_dim : -3], 0.0, 1e-2)
                     lin.weight.data[:, -3:] = 0.0  # keep the xyz portion zeroed
 
     def forward(self, latent: Tensor, xyz: Tensor) -> Tensor:

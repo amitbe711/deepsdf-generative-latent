@@ -25,6 +25,22 @@ eval cube (eikonal's trivial minimizers are not unique/anchored to the actual
 shape). Scale ``eikonal_lambda`` down roughly by ``clamp_delta`` (e.g. 0.01)
 so it regularizes rather than dominates, and watch that ``eik`` in the logs
 actually trends down over training rather than plateauing high immediately.
+
+Optional ``code_reg_warmup_iters`` ramps ``code_reg_lambda`` linearly from 0
+up to its configured value over the first N iterations (default 0 -- no
+warmup, full strength from step 1, matching all existing validated configs).
+Rationale: Adam normalizes each parameter's step size by that parameter's own
+gradient RMS, so early on -- when the codes' recon-driven gradient is still
+tiny/noisy (decoder hasn't learned meaningful per-shape structure yet) --
+Adam takes near-``lr``-sized steps toward whichever direction is most
+*consistent* over time, largely independent of raw gradient magnitude.
+``code_reg`` gives a tiny but perfectly consistent pull toward ``z=0`` every
+single step, and can win this race outright even when the codes' initial
+coupling to the decoder is nonzero (verified: a 100x stronger latent-column
+init at ``hidden_dim=512`` still collapsed |z| at the *same rate* as no fix
+at all). Silencing ``code_reg`` for a short warmup removes this competing
+force during the critical early window, letting whatever (however weak)
+recon signal exists establish real per-shape structure uncontested.
 """
 
 from __future__ import annotations
@@ -105,6 +121,7 @@ def train_stage1(
     shapes_per_batch = int(s1.shapes_per_batch)
     points_per_shape = int(s1.points_per_shape)
     eik_lambda = float(s1.get("eikonal_lambda", 0.0))
+    code_reg_warmup_iters = int(s1.get("code_reg_warmup_iters", 0))
 
     history: list[dict[str, float]] = []
     iterator = range(num_iters)
@@ -127,7 +144,13 @@ def train_stage1(
         pred = decoder(z, pts).squeeze(-1)
         recon = clamped_l1_loss(pred, sdf, delta)
         # Regularize codes toward the origin (MAP under a zero-mean Gaussian prior).
-        reg = code_reg * torch.mean(torch.sum(z**2, dim=-1))
+        # Ramp up from 0 over the warmup window so it isn't competing with the
+        # still-tiny/noisy recon signal for z during the critical early steps.
+        if code_reg_warmup_iters > 0:
+            reg_lambda = code_reg * min(1.0, step / code_reg_warmup_iters)
+        else:
+            reg_lambda = code_reg
+        reg = reg_lambda * torch.mean(torch.sum(z**2, dim=-1))
         loss = recon + reg
 
         eik = None
