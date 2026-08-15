@@ -50,8 +50,8 @@ LOCAL_REPO = LOCAL_BASE / "deepsdf-generative-latent"
 REPO_URL = "https://github.com/amitbe711/deepsdf-generative-latent.git"
 
 # ── Run knobs (override via widgets below) ─────────────────────────────────
-RUN_CONFIG = "configs/shapenet_overnight_n50.yaml"
-OUTPUT_NAME = "shapenet_overnight_n50"
+RUN_CONFIG = "configs/shapenet_quick_n10.yaml"
+OUTPUT_NAME = "shapenet_quick_n10"
 ONLY_D = "16"
 ONLY_N = ""
 MESHES_FOR_RUN = 0  # 0 = auto from config (N + reference + 10)
