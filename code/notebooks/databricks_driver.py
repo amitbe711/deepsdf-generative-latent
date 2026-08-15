@@ -50,8 +50,8 @@ LOCAL_REPO = LOCAL_BASE / "deepsdf-generative-latent"
 REPO_URL = "https://github.com/amitbe711/deepsdf-generative-latent.git"
 
 # ── Run knobs (override via widgets below) ─────────────────────────────────
-RUN_CONFIG = "configs/shapenet_quick_n10.yaml"
-OUTPUT_NAME = "shapenet_quick_n10"
+RUN_CONFIG = "configs/shapenet_overnight_n50.yaml"
+OUTPUT_NAME = "shapenet_n50_quality"
 ONLY_D = "16"
 ONLY_N = ""
 MESHES_FOR_RUN = 0  # 0 = auto from config (N + reference + 10)
@@ -231,22 +231,16 @@ def setup_repo() -> Path:
 
 
 def apply_stability_patches(cfg: dict, mode: str = "quality") -> dict:
-    """Memory-safe eval settings without destroying decode quality.
+    """Memory-safe eval settings without destroying training.
 
-    ``quality`` (default): keep full decoder + tanh; CPU decode + capped recon count.
-    ``stable``: legacy degraded run (hidden_dim 256, no tanh) if cluster still OOMs.
+    ``quality`` (default): keep config decoder (256, no tanh); CPU decode + capped recon.
+    ``stable``: further cuts recon count / skips IoU if cluster still OOMs.
     """
     ev = cfg.setdefault("eval", {})
     ev["recon_resolution"] = min(int(ev.get("recon_resolution", 48)), RECON_RESOLUTION_CAP)
     ev.setdefault("decode_device", "cpu")
 
     if mode == "stable":
-        dec = cfg.setdefault("decoder", {})
-        dec["use_tanh"] = False
-        if int(dec.get("hidden_dim", 512)) > 256:
-            dec["hidden_dim"] = 256
-        s1 = cfg.setdefault("stage1", {})
-        s1["lr_codes"] = max(float(s1.get("lr_codes", 1e-3)), 5e-3)
         ev["max_recon_shapes"] = min(int(ev.get("max_recon_shapes", 20)), 5)
         ev["num_generated"] = min(int(ev.get("num_generated", 50)), 15)
         ev["num_reference"] = min(int(ev.get("num_reference", 50)), 20)

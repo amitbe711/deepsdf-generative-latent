@@ -25,12 +25,12 @@ data:
   mesh_resolution: 48
 
 decoder:
-  hidden_dim: 512
+  hidden_dim: 256
   num_layers: 8
   skip_in: [4]
-  dropout_prob: 0.1
+  dropout_prob: 0.0
   use_weight_norm: true
-  use_tanh: true
+  use_tanh: false
   geometric_init: true
   init_radius: 0.5
 
