@@ -17,7 +17,7 @@ device: cuda
 data:
   source: mesh_dir
   # Colab Drive default; override with env or edit for local runs.
-  mesh_dir: /content/drive/MyDrive/shapenet/03001627
+  mesh_dir: /content/shapenet/03001627
   num_points: 8000
   surface_ratio: 0.9
   sigmas: [0.005, 0.02]
