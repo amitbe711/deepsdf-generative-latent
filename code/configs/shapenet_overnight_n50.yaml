@@ -17,7 +17,11 @@ data:
   mesh_resolution: 48
 
 decoder:
-  hidden_dim: 256
+  # 512 (DeepSDF paper width): 256 was undersized to represent thin chair
+  # structure (legs/backrests) once N grew past ~50; decodes collapsed to
+  # blobs. use_tanh=false + lr_codes==lr_decoder (below) avoid the earlier
+  # |z|-collapse mode, which was actually caused by tanh+high lr_codes, not width.
+  hidden_dim: 512
   num_layers: 8
   skip_in: [4]
   dropout_prob: 0.0
