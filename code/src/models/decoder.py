@@ -79,13 +79,21 @@ class DeepSDFDecoder(nn.Module):
                 nn.init.constant_(lin.bias, 0.0)
                 nn.init.normal_(lin.weight, 0.0, math.sqrt(2.0) / math.sqrt(out_dim))
                 if layer == 0:
-                    # Zero the latent columns so the initial field is a sphere,
-                    # identical for every shape code.
-                    lin.weight.data[:, : self.latent_dim] = 0.0
+                    # Small (not exactly zero) latent columns: keeps the initial
+                    # field an approximate sphere, nearly identical across codes,
+                    # but gives z a genuine nonzero d(output)/dz from step 1.
+                    # Exactly zero here means the *only* early gradient signal on
+                    # z is code_reg_lambda pulling it to 0 (recon's z-gradient is
+                    # exactly zero through a zero weight column), racing against
+                    # a slow bootstrap of these weights away from zero -- a race
+                    # that more decoder capacity/denser data can win, collapsing
+                    # |z| to 0 (observed with hidden_dim=512 and denser sampling).
+                    nn.init.normal_(lin.weight.data[:, : self.latent_dim], 0.0, 1e-4)
                 if layer in self.skip_in:
-                    # Zero the appended-input columns so the skip does not perturb
-                    # the sphere at initialization.
-                    lin.weight.data[:, -self.input_dim :] = 0.0
+                    # Same rationale for the re-injected latent columns at the
+                    # skip connection.
+                    nn.init.normal_(lin.weight.data[:, -self.input_dim : -3], 0.0, 1e-4)
+                    lin.weight.data[:, -3:] = 0.0  # keep the xyz portion zeroed
 
     def forward(self, latent: Tensor, xyz: Tensor) -> Tensor:
         """Predict SDF for ``latent`` [B, D] paired with ``xyz`` [B, 3] -> [B, 1]."""
