@@ -3,6 +3,17 @@
 Loss = clamped-L1 SDF reconstruction + latent-code regularization, exactly as in
 DeepSDF (Park et al., 2019, Eq. 5 / Sec. 4). The decoder weights ``theta`` and
 the codes ``{z_i}`` are optimized together.
+
+Optional Eikonal regularization (Gropp et al., 2020, "Implicit Geometric
+Regularization for Learning Shapes") penalizes ``|| grad_x f(z, x) || != 1``,
+pushing the network toward a genuine *metric* SDF instead of an arbitrary
+scalar field that merely fits sampled point values. This directly targets the
+"low pointwise loss but incoherent/blobby extracted mesh" failure mode: plain
+clamped-L1 only constrains the field AT the sampled points, so between them it
+can behave arbitrarily, producing spurious zero-crossings or blob-like
+surfaces once resolved on a dense marching-cubes grid. Opt-in via
+``stage1.eikonal_lambda`` (default 0.0 — off, matching all existing validated
+configs) since it costs a second backward pass (double the memory/time).
 """
 
 from __future__ import annotations
@@ -21,6 +32,24 @@ def clamped_l1_loss(pred: Tensor, target: Tensor, delta: float) -> Tensor:
     pred_c = torch.clamp(pred, -delta, delta)
     target_c = torch.clamp(target, -delta, delta)
     return torch.abs(pred_c - target_c).mean()
+
+
+def eikonal_loss(pred: Tensor, points: Tensor) -> Tensor:
+    """Penalize deviation of ``|| grad_x pred ||`` from 1 (unit-norm SDF gradient).
+
+    ``points`` must be a leaf tensor with ``requires_grad_(True)`` and ``pred``
+    must have been produced by a graph rooted at it. ``create_graph=True`` lets
+    the eikonal term itself be backpropagated into the decoder weights.
+    """
+    grad = torch.autograd.grad(
+        outputs=pred,
+        inputs=points,
+        grad_outputs=torch.ones_like(pred),
+        create_graph=True,
+        retain_graph=True,
+        only_inputs=True,
+    )[0]
+    return ((grad.norm(dim=-1) - 1.0) ** 2).mean()
 
 
 def train_stage1(
@@ -64,6 +93,7 @@ def train_stage1(
     num_iters = int(s1.num_iters)
     shapes_per_batch = int(s1.shapes_per_batch)
     points_per_shape = int(s1.points_per_shape)
+    eik_lambda = float(s1.get("eikonal_lambda", 0.0))
 
     history: list[dict[str, float]] = []
     iterator = range(num_iters)
@@ -79,6 +109,8 @@ def train_stage1(
             shapes_per_batch, points_per_shape, generator=generator
         )
         idx, pts, sdf = idx.to(device), pts.to(device), sdf.to(device)
+        if eik_lambda > 0:
+            pts.requires_grad_(True)
 
         z = codes(idx)
         pred = decoder(z, pts).squeeze(-1)
@@ -86,6 +118,11 @@ def train_stage1(
         # Regularize codes toward the origin (MAP under a zero-mean Gaussian prior).
         reg = code_reg * torch.mean(torch.sum(z**2, dim=-1))
         loss = recon + reg
+
+        eik = None
+        if eik_lambda > 0:
+            eik = eikonal_loss(pred, pts)
+            loss = loss + eik_lambda * eik
 
         optimizer.zero_grad()
         loss.backward()
@@ -98,13 +135,16 @@ def train_stage1(
                 "recon": float(recon.item()),
                 "reg": float(reg.item()),
             }
+            if eik is not None:
+                row["eikonal"] = float(eik.item())
             history.append(row)
             if verbose:
                 z_norm = float(torch.mean(torch.norm(z, dim=-1)).item())
+                eik_str = f" eik={row['eikonal']:.4f}" if eik is not None else ""
                 status(
                     f"stage1 {int(step) + 1}/{num_iters} "
-                    f"loss={row['loss']:.4f} recon={row['recon']:.4f} reg={row['reg']:.6f} "
-                    f"|z|={z_norm:.4f}",
+                    f"loss={row['loss']:.4f} recon={row['recon']:.4f} reg={row['reg']:.6f}"
+                    f"{eik_str} |z|={z_norm:.4f}",
                     prefix=prefix,
                 )
                 if step >= 400 and z_norm < 0.05:
