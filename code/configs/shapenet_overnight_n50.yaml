@@ -11,7 +11,7 @@ data:
   source: mesh_dir
   mesh_dir: /local_disk0/3d_project/shapenet/03001627
   num_points: 8000
-  surface_ratio: 0.7   # more far-field samples so the SDF sign is constrained off-surface
+  surface_ratio: 0.9   # reverted: 0.7 caused |z| collapse (too few near-surface samples)
   sigmas: [0.005, 0.02]
   num_surface_points: 2048
   mesh_resolution: 48
