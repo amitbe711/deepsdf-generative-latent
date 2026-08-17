@@ -270,9 +270,24 @@ def _ground_truth_meshes(cfg: dict, count: int) -> list:
     return meshes
 
 
-def plot_gallery(summary: list[dict], input_dir: Path, path: Path) -> None:
-    # Use the largest-N cell for the qualitative gallery.
-    cell = max(summary, key=lambda c: c["N"])
+def plot_gallery(
+    summary: list[dict], input_dir: Path, path: Path, cell_tag: str | None = None
+) -> None:
+    """Render the 5-row qualitative gallery for one cell.
+
+    ``cell_tag`` selects the cell as ``N<n>_D<d>``; the report uses the smallest-N
+    cell, where the DDPM's valid-ratio failure is visible. Defaults to the
+    largest-N cell, which is the best-trained one.
+    """
+    if cell_tag is not None:
+        by_tag = {f"N{c['N']}_D{c['D']}": c for c in summary}
+        if cell_tag not in by_tag:
+            raise SystemExit(
+                f"gallery cell {cell_tag!r} not in summary; have {sorted(by_tag)}"
+            )
+        cell = by_tag[cell_tag]
+    else:
+        cell = max(summary, key=lambda c: c["N"])
     tag = f"N{cell['N']}_D{cell['D']}"
     ckpt_path = input_dir / tag / "checkpoint.pt"
     if not ckpt_path.exists():
@@ -346,6 +361,12 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", type=str, default="outputs/grid")
     parser.add_argument("--figures", type=str, default="figures")
+    parser.add_argument(
+        "--gallery-cell",
+        type=str,
+        default=None,
+        help="cell to render the gallery from, e.g. N10_D16 (default: largest N)",
+    )
     args = parser.parse_args()
 
     input_dir = Path(args.input)
@@ -363,7 +384,7 @@ def main() -> None:
     plot_generation_curves(rows, fig_dir / "degradation_generation.png")
     plot_reconstruction_curves(rows, fig_dir / "degradation_reconstruction.png")
     plot_loss_curves(summary, fig_dir / "loss_curves.png")
-    plot_gallery(summary, input_dir, fig_dir / "gallery.png")
+    plot_gallery(summary, input_dir, fig_dir / "gallery.png", args.gallery_cell)
     print(f"Wrote tables and figures -> {fig_dir}")
 
 

@@ -71,15 +71,18 @@ model (GMM), and a DDPM denoising the codes directly---then compare them as the
 dataset shrinks, $N \in \{10,50,150\}$, on ShapeNet chairs (synset 03001627),
 with latent dimension $D$ held fixed and ablated separately. We evaluate
 reconstruction (Chamfer, IoU) and generation (Coverage, MMD, 1-NN accuracy).
-\TODO{one sentence with the headline generator-comparison result}
-Along the way we report two findings that dominated the outcome: raw ShapeNet
-meshes are not watertight, which silently corrupts the SDF \emph{sign} that
-DeepSDF trains on, and once that is repaired, added decoder capacity lowers
-training loss while making the extracted geometry worse. In both cases the
-training loss improved while the extracted geometry degraded, which is the
-practical lesson we draw: on a pipeline that ends in Marching Cubes, point-wise
-loss is a weak proxy for surface quality. Synthetic parametric shapes are used
-only for pipeline smoke tests.
+Diffusion does not pay for itself in this regime: the GMM attains the best
+Coverage at every $N$ and the Gaussian is close behind, while the DDPM wins no
+cell outright, is the worst generator on every generation metric at $N=150$, and
+at $N=10$ produces an extractable surface for only $15\%$ of its samples against
+$100\%$ for the Gaussian. Along the way we report the finding that dominated the
+outcome: raw ShapeNet meshes are not watertight, which silently corrupts the SDF
+\emph{sign} that DeepSDF trains on. Before we repaired it, added capacity lowered
+training loss while making the extracted geometry worse --- an inversion that
+disappears once the labels describe a closed solid. That is the practical lesson we
+draw: on a pipeline that ends in Marching Cubes, point-wise loss is a weak proxy
+for surface quality. Synthetic parametric shapes are used only for pipeline smoke
+tests.
 \end{abstract}
 
 \section{Introduction and Related Work}
@@ -246,22 +249,26 @@ All experiments use ShapeNetCore chairs (synset \texttt{03001627}).
 
 \paragraph{Experimental design.} The proposal specified a full $N\times D$ grid.
 We instead run the $N$-sweep at a \emph{fixed} $D$ and treat $D$ as a single
-ablation. The reason is an earlier observation, made before the mesh repair of
+ablation. The reason was an observation made \emph{before} the mesh repair of
 \cref{sec:watertight} was in place: at $N=50$, raising $D$ from $16$ to $32$
-\emph{degraded} reconstruction Chamfer rather than improving it, echoing the
-decoder-width result of \cref{sec:failure-modes}. Since both capacity axes pointed
-the same way, crossing $D$ with every $N$ would largely re-measure one effect three
-times. The main sweep is therefore $N \in \{10, 50, 150\}$ at $D=16$ (three cells,
-each with all three generators), plus one $D=32$ cell at $N=50$ re-measured under
-the repaired pipeline (\cref{sec:ablation}) so the ablation is comparable to the
-rest of the results. This keeps the comparison the paper is actually about ---
-Gaussian vs.\ GMM vs.\ DDPM as $N$ shrinks --- free of a confounded capacity axis.
+degraded reconstruction Chamfer rather than improving it, echoing the decoder-width
+result of \cref{sec:failure-modes}. With both capacity axes apparently pointing the
+same way, crossing $D$ with every $N$ would have largely re-measured one effect
+three times. The main sweep is therefore $N \in \{10, 50, 150\}$ at $D=16$ (three
+cells, each with all three generators), plus one $D=32$ cell at $N=50$. We
+re-measured that ablation cell under the repaired pipeline, and it no longer
+reproduces the degradation that motivated the design --- a result we report and
+interpret in \cref{sec:ablation} rather than quietly drop, because it is itself
+evidence about the label bug. The design choice still buys what it was meant to
+buy: the comparison the paper is actually about, Gaussian vs.\ GMM vs.\ DDPM as
+$N$ shrinks, is measured along a single clean axis.
 
 \paragraph{Training.} Each cell trains Stage~1 for $8000$ iterations with Adam
 (learning rate $10^{-3}$ for both decoder and codes), sampling $48$ shapes and
 $1024$ points per shape per iteration, then fits the three Stage-2 generators on
-the frozen codes. The GMM uses $K=5$ components (capped so no component receives
-fewer than $5$ codes). The DDPM uses $200$ timesteps with a cosine schedule
+the frozen codes. The GMM requests $K=5$ components but caps $K$ so that each
+receives at least $5$ codes on average, giving $K=2$ at $N=10$ and $K=5$ at
+$N=50$ and $N=150$. The DDPM uses $200$ timesteps with a cosine schedule
 \citep{nichol2021improvedddpm}, a $4$-layer width-$256$ MLP with a $64$-d
 sinusoidal time embedding, trained $3000$ iterations at learning rate $10^{-3}$.
 
@@ -344,7 +351,10 @@ sampled points (\cref{sec:watertight}). We note the ordering honestly --- capaci
 and optimizer changes were attempted first and did not help --- because the
 \emph{pattern} of failure, not any single metric, is what identified the cause.
 It also explains why we keep width at $256$: until the label bug was fixed, extra
-capacity only fit the wrong target more precisely.
+capacity only fit the wrong target more precisely. Every measurement in this
+paragraph predates the repair, and the latent-dimension ablation of
+\cref{sec:ablation} shows the paradox reversing once the labels are corrected ---
+which is the outcome the diagnosis predicts.
 
 \subsection{Quantitative results}
 \label{sec:quantitative}
@@ -352,6 +362,16 @@ capacity only fit the wrong target more precisely.
 generation quality changes with $N$ for each generator at $D=16$, and
 \cref{fig:recon} the corresponding reconstruction trend. Training curves are in
 \cref{fig:loss} and qualitative samples in \cref{fig:gallery}.
+
+The headline is that the simplest priors are the best ones here. The GMM attains
+the highest Coverage at every $N$ ($0.325$, $0.300$, $0.400$) and the Gaussian is
+close behind ($0.250$, $0.275$, $0.325$); the DDPM never wins a cell outright. At
+$N=10$ it fails outright, producing an extractable surface for only $15\%$ of its
+samples, and at $N=150$ it is the worst generator on all four generation metrics.
+Its single competitive result is the best MMD in the study ($0.0229$ at $N=50$).
+Stage~1 itself trained cleanly in all four cells: final loss $0.0024$--$0.0049$
+and a code norm that grew monotonically to $0.29$--$0.41$, with none of the
+collapse of \cref{sec:failure-modes}.
 
 \begin{table*}[t]
 \centering
@@ -390,9 +410,12 @@ noise-prediction loss for each cell.}
 \begin{figure*}[t]
 \centering
 \includegraphics[width=\textwidth]{gallery.png}
-\caption{Qualitative ShapeNet results, rendered as shaded solids. Rows:
-ground-truth chair, reconstruction from its learned code, then samples from the
-Gaussian, GMM, and DDPM priors.}
+\caption{Qualitative ShapeNet results at $N=10$, $D=16$, rendered as shaded
+solids. Rows: ground-truth chair, reconstruction from its learned code, then
+samples from the Gaussian, GMM, and DDPM priors. Reconstructions keep the coarse
+silhouette but lose thin structure (the legs of column~1). Every DDPM sample
+failed to produce a surface, which is the $0.15$ valid ratio of
+\cref{tab:results} made visible; failed decodes are labelled rather than omitted.}
 \label{fig:gallery}
 \end{figure*}
 
@@ -402,10 +425,22 @@ The final block of \cref{tab:results} reports the $D=32$ cell at $N=50$, to be
 compared against the $D=16$ cell at the same $N$. Doubling the latent dimension
 doubles the per-shape capacity available to Stage~1 while leaving the decoder and
 the training budget unchanged, so it is the cheapest available test of whether the
-codes --- rather than the decoder --- were the bottleneck. It also determines
-whether a $D$-sweep is worth spending the remaining compute on: if $D=32$ does not
-help at the middle $N$, crossing $D$ with every $N$ mostly re-measures the same
-effect.
+codes --- rather than the decoder --- were the bottleneck.
+
+The two halves of the pipeline answer in opposite directions. Reconstruction
+improves substantially: Chamfer falls from $0.0361$ to $0.0145$ and IoU rises from
+$0.736$ to $0.814$, the best reconstruction of any cell in the study. Generation
+does not follow. Coverage drops for every prior ($0.275 \to 0.225$ Gaussian,
+$0.300 \to 0.225$ GMM, $0.275 \to 0.250$ DDPM), and the DDPM degrades sharply,
+with MMD more than doubling ($0.0229 \to 0.0506$) and its valid ratio falling from
+$1.00$ to $0.85$. Only the GMM's MMD improves ($0.0294 \to 0.0279$), by a margin
+smaller than the spread across $N$.
+
+This is the trade-off one expects once Stage~1 is healthy. Wider codes give
+Stage~1 more room per shape, but Stage~2 then has to do density estimation in
+$\mathbb{R}^{32}$ from the same $50$ points, and the diffusion model --- the most
+parameter-hungry of the three and the one with the least inductive bias --- pays
+the largest price for it.
 
 \subsection{Discussion}
 
@@ -418,7 +453,17 @@ extractable surface at all. A generator can look strong on Coverage and MMD whil
 quietly failing on a large fraction of its samples, since those metrics are
 computed only over samples that yielded a mesh. We therefore treat valid ratio as
 a first-class result rather than a diagnostic.
-\TODO{state reconstruction CD/IoU and the valid-ratio range actually observed}
+
+Reconstruction is adequate across the sweep --- Chamfer $0.0122$--$0.0361$ and IoU
+$0.683$--$0.784$ at $D=16$ --- so Stage~1 is not the binding constraint on the
+comparison. The valid ratio is where the priors separate. It is $1.00$ in nine of
+the twelve generator/cell combinations, and every exception belongs to a
+non-Gaussian prior: the GMM once, mildly ($0.975$ at $N=10$), and the DDPM twice,
+severely ($0.85$ at $D=32$, and $0.15$ at $N=10$). That last number is the one the
+argument above was written for. The DDPM's Coverage and MMD at $N=10$ are computed
+over the six samples that produced a surface out of forty, so they are not
+comparable to the other rows; reported alone they would understate the failure by
+roughly an order of magnitude.
 
 \paragraph{Do the priors differ at all?} This is the paper's question, and the
 informative outcome may well be a negative one. At small $N$ the empirical code
@@ -430,8 +475,21 @@ noise of each other, the practical conclusion is that diffusion's extra machiner
 buys nothing in this regime --- which is precisely the claim the proposal set out
 to test, and it inverts the usual reading of 3D-LDM's result by showing where its
 advantage comes from (scale) rather than disputing it.
-\TODO{compare the three generators on Coverage/MMD/1-NN; say whether the gaps
-exceed the spread across $N$, and note any consistent ordering}
+
+The outcome is negative for diffusion, but not in the way anticipated: the priors
+do differ, and the ordering is consistent and against the DDPM. On Coverage the
+GMM leads at every $N$ and the ranking GMM $\ge$ Gaussian $>$ DDPM holds in two of
+three cells (the three tie within $0.025$ at $N=50$). On MMD the Gaussian and GMM
+sit in a narrow band, $0.0244$--$0.0310$, that is comparable to the change induced
+by varying $N$; the DDPM produces both the best value in the study ($0.0229$ at
+$N=50$) and by some margin the worst ($0.0424$ at $N=150$, $0.0506$ at $D=32$),
+which is the signature of a high-variance estimator rather than a better one. The
+Gaussian--GMM gap is real but modest: the GMM's Coverage advantage over the
+Gaussian is $0.075$, $0.025$, and $0.075$, always in the same direction but of the
+same order as the spread across $N$. So the honest reading is that a mixture is
+worth its two extra lines over a single Gaussian, and that the diffusion model,
+which costs an entire second training loop, is not merely unhelpful here but
+actively harmful at the extremes of the sweep.
 
 \paragraph{The 1-NN sanity check.} 1-NN accuracy is the strictest of the three
 generation metrics: $0.5$ means a classifier cannot tell generated shapes from
@@ -439,19 +497,57 @@ real ones, and values near $1.0$ mean it always can. Under a budget of $40$
 samples against $40$ references, and with reconstructions that are themselves
 imperfect, we expect values far above $0.5$ --- a reminder that Coverage and MMD
 alone can flatter a generator whose samples are individually implausible.
-\TODO{report the 1-NN range and whether any generator approaches $0.5$}
+
+Observed 1-NN accuracy spans $0.900$--$0.988$ and no generator comes close to
+$0.5$: the best value in the study is the Gaussian at $N=50$ ($0.900$), and eight
+of the twelve rows exceed $0.93$. Generated and real chairs therefore remain
+trivially separable in every configuration we ran, which bounds how much weight
+the Coverage and MMD comparisons can carry. The ranking above describes degrees of
+failure, not a contest between models that work. This is the metric most
+responsive to reconstruction quality rather than to the prior, and it is
+consistent with a gallery in which samples are chair-\emph{like} without being
+chairs.
 
 \paragraph{Trend with $N$.} More shapes cut two ways here. The prior sees a larger
 sample, which should help it, but Stage~1 must fit more geometry with a fixed
 decoder and a fixed iteration budget, which should hurt reconstruction --- and
 reconstruction quality caps everything downstream. \Cref{fig:degradation} and
 \cref{fig:recon} separate these effects.
-\TODO{state which effect dominates between $N=10$ and $N=150$}
+
+Both effects appear, and for the two classical priors the prior-side gain wins.
+Reconstruction IoU falls monotonically as $N$ grows, $0.784 \to 0.736 \to 0.683$,
+exactly the fixed-capacity story. Yet Coverage rises over the same range for the
+Gaussian ($0.250 \to 0.325$) and the GMM ($0.325 \to 0.400$): a better-estimated
+prior more than compensates for a slightly worse decoder. The DDPM does not share
+this, improving sharply from $N=10$ to $N=50$ ($0.100 \to 0.275$, and $0.15 \to
+1.00$ valid) and then degrading at $N=150$ ($0.225$) --- its problem is not sample
+size alone.
+
+Reconstruction Chamfer is not monotone ($0.0151$, $0.0361$, $0.0122$), and we read
+the IoU trend as the reliable one. Chamfer here is an unbounded average over only
+ten shapes, so a single poor decode can dominate it, whereas IoU is bounded in
+$[0,1]$ and cannot be moved as far by one outlier. Reporting both is what makes
+the discrepancy visible; either metric alone would have told a tidier story than
+the data supports.
 
 \paragraph{Latent dimension.} \Cref{sec:ablation} compares $D=32$ against $D=16$
-at $N=50$ under the repaired pipeline.
-\TODO{report whether $D=32$ helps, hurts, or is neutral, and reconcile with the
-pre-repair observation that motivated fixing $D=16$}
+at $N=50$ under the repaired pipeline: it helps Stage~1 (IoU $0.736 \to 0.814$)
+and hurts Stage~2 (Coverage down for all three priors). The comparison worth
+drawing out is with the pre-repair measurement that motivated fixing $D=16$ in the
+first place, where the same change moved Chamfer from $0.129$ to $0.540$. That
+result does not reproduce. Under corrected labels the sign flips and $D=32$ gives
+the best reconstruction in the study.
+
+We take this as further evidence for the diagnosis of \cref{sec:watertight} rather
+than as noise. The pre-repair pipeline rewarded capacity for fitting a sign field
+that was largely arbitrary near the surface, so more capacity meant a better fit to
+worse labels --- the same inversion as the decoder-width result in
+\cref{sec:failure-modes}. Once the labels describe a closed solid, capacity behaves
+as one would expect on the axis it should help. The honest caveat is that this
+also weakens the original justification for the scoped design, and that we
+re-tested only the latent dimension: the width-$512$ decoder was never re-run
+post-repair, so we cannot claim the width result inverts too, only that we no
+longer have reason to believe it as stated.
 
 \paragraph{Qualitative gallery.} \Cref{fig:gallery} is the check that the metrics
 cannot provide. Chamfer distance between surface point clouds is fairly forgiving
@@ -461,8 +557,23 @@ gallery alongside the table is what caught the label bug of
 \cref{sec:watertight} in the first place: the numbers were unremarkable while the
 meshes were fragments. Failed decodes are drawn as an explicit \emph{fail} marker
 rather than silently omitted, so the figure and the valid ratio agree.
-\TODO{describe what the samples actually look like per prior --- coherence,
-diversity, mode collapse, and any visible difference between GMM and DDPM}
+
+What \cref{fig:gallery} shows is a pipeline that has crossed from incoherent to
+coarse. Ground-truth chairs are cleanly repaired solids, and reconstructions
+recover the seat-and-back massing while losing thin structure: the sled legs of
+the first column disappear, and the slatted back of the second becomes a plate.
+That is the visual counterpart of a $D=16$ code and a $48^3$ extraction grid, and
+it is what caps 1-NN accuracy well above $0.5$. Samples from the Gaussian and GMM
+priors are chair-like in silhouette and clearly varied --- seats, backs, and
+armrest-like masses in plausible relative positions --- but they are not chairs;
+several have holes or detached fragments, which is why they can score reasonable
+Coverage while remaining trivially separable from real shapes. There is no visible
+mode collapse: distinct samples remain distinct, consistent with Coverage that
+rises rather than saturates. The DDPM row contains no geometry at all, every one
+of its four samples having failed to cross zero. That is the clearest statement of
+the paper's result: at $N=10$, the two priors that assume a shape for the code
+distribution still produce chairs, and the one that tries to learn the shape from
+ten examples produces nothing.
 
 \section{Conclusion}
 We compared Gaussian, GMM, and DDPM priors over frozen DeepSDF codes on a
@@ -470,18 +581,28 @@ ShapeNet chair subset as the dataset shrank, $N \in \{10,50,150\}$ at $D=16$,
 with $D=32$ ablated separately. The goal was not state of the art but a
 controlled answer to when diffusion is worth its complexity on real meshes under
 a modest compute budget.
-\TODO{answer the question in one or two sentences, with the numbers that support
-it}
 
-The most transferable lesson is not about the priors at all. Two failures
-dominated our results, and both presented as \emph{optimization} problems while
-actually being something else: non-watertight input meshes corrupting the SDF
-sign that DeepSDF trains on (\cref{sec:watertight}), and added capacity
-simultaneously lowering training loss and worsening extracted geometry
-(\cref{sec:failure-modes}). In both cases the training loss --- the quantity one
-naturally monitors --- moved in the reassuring direction while the artifact we
-cared about got worse. On a pipeline that ends in Marching Cubes, point-wise loss
-is a weak proxy for the surface, and geometry has to be inspected directly.
+It is not worth it at this scale. The GMM gave the best Coverage at every $N$
+($0.325$, $0.300$, $0.400$) with the Gaussian just behind, while the DDPM won no
+cell, was worst on every generation metric at $N=150$, and at $N=10$ decoded to a
+surface only $15\%$ of the time against $100\%$ for the Gaussian. Its one strength,
+the best MMD in the study at $N=50$ ($0.0229$), sits alongside the two worst
+($0.0424$ and $0.0506$), which reads as variance rather than capability. The
+ranking is also not close to a contest between working models: 1-NN accuracy never
+fell below $0.900$ against an ideal of $0.5$, so what we are ranking is degrees of
+failure. Read against 3D-LDM, this locates the benefit of latent diffusion in the
+data scale it was demonstrated at rather than in the mechanism itself.
+
+The most transferable lesson is not about the priors at all. The failure that
+dominated our results presented as an \emph{optimization} problem while actually
+being a data problem: non-watertight input meshes corrupting the SDF sign that
+DeepSDF trains on (\cref{sec:watertight}). Its most confusing symptom was that
+added capacity simultaneously lowered training loss and worsened extracted geometry
+(\cref{sec:failure-modes}) --- an inversion that vanished once the labels were
+repaired, as the latent-dimension ablation confirms. The training loss, the
+quantity one naturally monitors, moved in the reassuring direction throughout. On a
+pipeline that ends in Marching Cubes, point-wise loss is a weak proxy for the
+surface, and geometry has to be inspected directly.
 
 Limitations include the cost of mesh repair, the sensitivity of Marching Cubes to
 under-trained fields, the single synset, and the modest sample counts behind the

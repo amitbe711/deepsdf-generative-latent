@@ -29,8 +29,11 @@ Overleaf works too: upload this folder and set `main.tex` as the main document.
 from a completed grid run:
 
 ```bash
-# from Final_Project/code/
-python scripts/make_figures.py --input outputs/shapenet_scoped --figures ../report/figures
+# from Final_Project/code/, against a completed run directory
+python scripts/make_figures.py \
+    --input outputs/shapenet_scoped \
+    --figures ../report/figures \
+    --gallery-cell N10_D16
 ```
 
 This writes `results_table.tex` (`\input` by the report) plus
@@ -38,39 +41,25 @@ This writes `results_table.tex` (`\input` by the report) plus
 `loss_curves.png`, and `gallery.png`. It reads `summary.json` from the run
 directory, so re-running it after adding grid cells refreshes everything.
 
+`--gallery-cell N10_D16` matters: the gallery defaults to the largest-N cell, but
+the report shows N=10 because that is where the DDPM's valid-ratio failure is
+visible as an empty row, and the caption describes that cell specifically.
+
 The experiment grid is intentionally ragged: one latent dimension carries the
 N-sweep and any other D appears at a single N as an ablation. `make_figures.py`
 handles this by plotting only the sweep dimension in the degradation figures and
 reporting the ablation as a separate block in the results table.
 
-## Finishing the report once the grid has run
+## Status
 
-Everything except the empirical claims is written. Remaining slots are marked with
-a loud red `[TODO: ...]` in the compiled PDF (the `\TODO` macro in `main.tex`), so
-nothing can be handed in half-filled by accident.
+The report is complete: every number in it comes from the `shapenet_scoped` run
+(three N-sweep cells at D=16 plus the D=32 ablation at N=50), and no `\TODO`
+placeholders remain. To confirm after any edit:
 
 ```bash
-# 1. numbers + plots (overwrites the placeholder table and the placeholder PNGs)
-cd code && python scripts/make_figures.py \
-    --input outputs/shapenet_scoped --figures ../report/figures
-
-# 2. fill in every \TODO in main.tex
-grep -n "TODO" ../report/main.tex
-
-# 3. rebuild and confirm no TODO survives
-cd ../report && tectonic main.tex
-python -c "from pypdf import PdfReader; \
-  t='\n'.join(p.extract_text() for p in PdfReader('main.pdf').pages); \
-  print('remaining TODOs:', t.count('TODO'))"
-
-# 4. package
-cd ../code && python scripts/make_submission.py --name AmitBenbenishti_final
+grep -c '\\TODO{' main.tex     # expect 0
+tectonic main.tex              # expect no "Overfull \hbox" warnings
 ```
-
-The figures currently in `figures/` are deliberate placeholders that say so on
-their face; step 1 replaces them. They are placeholders rather than the older
-synthetic-data plots so that no synthetic number can be mistaken for a ShapeNet
-result.
 
 ## Files
 

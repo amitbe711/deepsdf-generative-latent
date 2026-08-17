@@ -47,12 +47,23 @@ python scripts/run_grid.py --config configs/shapenet_grid.yaml --output $OUT --o
 # Latent-dimension ablation: one D = 32 cell at N = 50
 python scripts/run_grid.py --config configs/shapenet_grid.yaml --output $OUT --only-N 50 --only-D 32
 # Tables + figures for the report
-python scripts/make_figures.py --input $OUT --figures ../report/figures
+python scripts/make_figures.py --input $OUT --figures ../report/figures --gallery-cell N10_D16
 ```
 
 Both runs accumulate into one `$OUT/summary.json`, and cells that already have a
 `metrics.json` are skipped, so an interrupted run resumes by re-issuing the same
-command (`--force` re-runs anyway).
+command (`--force` re-runs anyway). End to end the four cells take roughly 2.5
+hours on a Colab T4, most of it SDF-sampling meshes off Drive rather than
+training.
+
+### Headline result
+
+The GMM prior gives the best Coverage at every N (0.325 / 0.300 / 0.400), the
+Gaussian trails it closely, and the DDPM wins no cell: it is the worst generator
+on every generation metric at N=150, and at N=10 only 15% of its samples decode to
+a surface (against 100% for the Gaussian). 1-NN accuracy stays in 0.900–0.988
+against an ideal of 0.5, so all three priors remain trivially separable from real
+chairs — the ranking is between degrees of failure. See `report/main.pdf`.
 
 Build the PDF with `cd report && tectonic main.tex` (see
 [`report/README.md`](report/README.md)), then package the submission:
