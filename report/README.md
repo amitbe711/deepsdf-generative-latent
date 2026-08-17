@@ -41,6 +41,11 @@ This writes `results_table.tex` (`\input` by the report) plus
 `loss_curves.png`, and `gallery.png`. It reads `summary.json` from the run
 directory, so re-running it after adding grid cells refreshes everything.
 
+The paper includes two of the four figures — the generation curves and the
+gallery. The reconstruction curves and loss curves are still generated (both are
+useful when checking a run) but their content is two sentences in the text, which
+is not worth a figure in a 4-page paper.
+
 `--gallery-cell N10_D16` matters: the gallery defaults to the largest-N cell, but
 the report shows N=10 because that is where the DDPM's valid-ratio failure is
 visible as an empty row, and the caption describes that cell specifically.
@@ -52,8 +57,9 @@ reporting the ablation as a separate block in the results table.
 
 ## Status
 
-The report is complete: every number in it comes from the `shapenet_scoped` run
-(three N-sweep cells at D=16 plus the D=32 ablation at N=50), and no `\TODO`
+The report is complete: 4 pages of body plus references and the proposal
+appendix (6 total). Every number comes from the `shapenet_scoped` run (three
+N-sweep cells at D=16 plus the D=32 ablation at N=50), and no `\TODO`
 placeholders remain. To confirm after any edit:
 
 ```bash

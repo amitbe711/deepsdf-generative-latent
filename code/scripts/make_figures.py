@@ -142,12 +142,13 @@ def write_latex_table(rows: list[dict], path: Path) -> None:
 
 
 def plot_generation_curves(rows: list[dict], path: Path) -> None:
-    # 2x2 rather than 1x4: the report is two-column, so a single wide strip of
-    # four panels shrinks past legibility even spanning both columns.
+    # A wide 1x4 strip: spanning both columns of a two-column paper, this costs a
+    # quarter of the vertical space a 2x2 block would. Fonts are enlarged to stay
+    # legible after the ~2x reduction to \textwidth.
     main_d = main_sweep_dim(rows)
     sweep = [r for r in rows if r["D"] == main_d]
     gens = sorted({r["generator"] for r in sweep})
-    fig, axes = plt.subplots(2, 2, figsize=(11, 8))
+    fig, axes = plt.subplots(1, 4, figsize=(14, 3.2))
     for ax, (key, title) in zip(axes.flat, GEN_METRICS):
         for gen in gens:
             sub = sorted(
@@ -161,16 +162,16 @@ def plot_generation_curves(rows: list[dict], path: Path) -> None:
                 marker="o",
                 label=gen,
             )
-        ax.set_xlabel("N (number of training shapes)")
-        ax.set_title(title)
+        ax.set_xlabel("N", fontsize=14)
+        ax.set_title(title, fontsize=15)
+        ax.tick_params(labelsize=12)
         ax.grid(True, alpha=0.3)
-        ax.legend(fontsize=9)
         # Mark the ideal 1-NN accuracy of 0.5 on its own panel.
         if key == "one_nn_acc" and any(r["one_nn_acc"] == r["one_nn_acc"] for r in sweep):
             ax.axhline(0.5, color="gray", linestyle="--", alpha=0.6)
-    fig.suptitle(f"Generation metrics vs. N (D={main_d})")
+    axes[0].legend(fontsize=12)
     fig.tight_layout()
-    fig.savefig(path, dpi=150)
+    fig.savefig(path, dpi=150, bbox_inches="tight")
     plt.close(fig)
 
 
