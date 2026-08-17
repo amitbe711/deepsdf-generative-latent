@@ -232,18 +232,24 @@ FACE_COLOR = np.array([0.55, 0.70, 0.90])
 UP_AXIS_SWAP = [0, 2, 1]  # ShapeNet is Y-up; matplotlib's 3rd axis is vertical
 
 
-def _render_mesh(ax, mesh, title: str) -> None:
+def _render_mesh(ax, mesh, title: str | None = None) -> None:
     ax.set_xlim(-1, 1)
     ax.set_ylim(-1, 1)
     ax.set_zlim(-1, 1)
     # 3D axes reserve generous margins around the data box; with the axes hidden
     # that reads as a tiny shape floating in whitespace, so zoom in on the box.
-    ax.set_box_aspect((1, 1, 1), zoom=1.45)
+    # Chairs are wider than they are tall, so the panel is shorter than square and
+    # the zoom is set to fill it without clipping a shape that reaches the corners.
+    ax.set_box_aspect((1, 1, 1), zoom=1.75)
     ax.set_axis_off()
     ax.view_init(elev=18, azim=-60)
-    ax.set_title(title, fontsize=9, pad=0)
+    if title is not None:
+        ax.set_title(title, fontsize=22, pad=4)
     if mesh is None or len(mesh.faces) == 0:
-        ax.text2D(0.35, 0.5, "fail", transform=ax.transAxes, fontsize=11)
+        ax.text2D(
+            0.5, 0.5, "fail", transform=ax.transAxes, fontsize=20,
+            ha="center", va="center", color="0.4",
+        )
         return
     verts = mesh.vertices[:, UP_AXIS_SWAP]
     normals = mesh.face_normals[:, UP_AXIS_SWAP]
@@ -272,13 +278,22 @@ def _ground_truth_meshes(cfg: dict, count: int) -> list:
 
 
 def plot_gallery(
-    summary: list[dict], input_dir: Path, path: Path, cell_tag: str | None = None
+    summary: list[dict],
+    input_dir: Path,
+    path: Path,
+    cell_tag: str | None = None,
+    examples: int = 3,
 ) -> None:
-    """Render the 5-row qualitative gallery for one cell.
+    """Render the qualitative gallery for one cell.
 
-    ``cell_tag`` selects the cell as ``N<n>_D<d>``; the report uses the smallest-N
-    cell, where the DDPM's valid-ratio failure is visible. Defaults to the
-    largest-N cell, which is the best-trained one.
+    Laid out with the five categories (ground truth, reconstruction, and one per
+    prior) as *columns* and ``examples`` independent draws as rows. Categories
+    read once as column headers rather than being repeated in every panel title,
+    and the result is wider than it is tall, which is what a two-column paper can
+    actually afford to print at a legible size.
+
+    ``cell_tag`` selects the cell as ``N<n>_D<d>``; defaults to the largest-N
+    cell, which is the best-trained one.
     """
     if cell_tag is not None:
         by_tag = {f"N{c['N']}_D{c['D']}": c for c in summary}
@@ -316,43 +331,43 @@ def plot_gallery(
     attr_cfg = AttrDict(cfg)
     # Coarse grids look blocky once rendered as a solid rather than as dots.
     res = max(int(cfg["eval"]["recon_resolution"]), 64)
-    columns = 4
 
     def decode(z):
         return decode_mesh(decoder, z.detach().cpu(), resolution=res, device=device)
 
-    rows: list[tuple[str, list]] = []
-    gt = _ground_truth_meshes(cfg, columns)
+    # One entry per column: (header, meshes down the rows).
+    cols: list[tuple[str, list]] = []
+    gt = _ground_truth_meshes(cfg, examples)
     if gt:
-        rows.append(("GT", gt))
-    rows.append(
-        ("Recon", [decode(codes[min(c, codes.shape[0] - 1)]) for c in range(columns)])
+        cols.append(("Ground truth", gt))
+    cols.append(
+        ("Reconstruction", [decode(codes[min(i, codes.shape[0] - 1)]) for i in range(examples)])
     )
 
     generators = list(cfg.get("grid", {}).get("generators", ["gaussian"]))
     if "gaussian" in generators:
         rng = torch.Generator().manual_seed(0)
-        z = fit_gaussian(attr_cfg, codes).sample(columns, generator=rng)
-        rows.append(("Gaussian", [decode(z[c]) for c in range(columns)]))
+        z = fit_gaussian(attr_cfg, codes).sample(examples, generator=rng)
+        cols.append(("Gaussian", [decode(z[i]) for i in range(examples)]))
     if "gmm" in generators:
         rng = torch.Generator().manual_seed(1)
-        z = fit_gmm(attr_cfg, codes).sample(columns, generator=rng)
-        rows.append(("GMM", [decode(z[c]) for c in range(columns)]))
+        z = fit_gmm(attr_cfg, codes).sample(examples, generator=rng)
+        cols.append(("GMM", [decode(z[i]) for i in range(examples)]))
     if "ddpm" in generators:
         ddpm = train_ddpm(attr_cfg, codes, device=device, progress=False)["model"]
-        z = ddpm.sample(columns, device=device).cpu()
-        rows.append(("DDPM", [decode(z[c]) for c in range(columns)]))
+        z = ddpm.sample(examples, device=device).cpu()
+        cols.append(("DDPM", [decode(z[i]) for i in range(examples)]))
 
-    fig = plt.figure(figsize=(2.9 * columns, 2.9 * len(rows)))
-    for r, (label, meshes) in enumerate(rows):
-        for c, mesh in enumerate(meshes):
-            ax = fig.add_subplot(
-                len(rows), columns, r * columns + c + 1, projection="3d"
-            )
-            _render_mesh(ax, mesh, f"{label} {c}")
-    fig.suptitle(f"Ground truth, reconstructions, and prior samples ({tag})")
+    ncols = len(cols)
+    fig = plt.figure(figsize=(2.9 * ncols, 2.2 * examples))
+    for c, (header, meshes) in enumerate(cols):
+        for r, mesh in enumerate(meshes):
+            ax = fig.add_subplot(examples, ncols, r * ncols + c + 1, projection="3d")
+            _render_mesh(ax, mesh, header if r == 0 else None)
+    # No suptitle: the caption already says which cell this is, and the headers
+    # already say what the columns are.
     fig.subplots_adjust(
-        left=0.01, right=0.99, top=0.95, bottom=0.01, wspace=0.0, hspace=0.12
+        left=0.005, right=0.995, top=0.94, bottom=0.005, wspace=0.0, hspace=0.0
     )
     fig.savefig(path, dpi=150, bbox_inches="tight")
     plt.close(fig)
@@ -367,6 +382,12 @@ def main() -> None:
         type=str,
         default=None,
         help="cell to render the gallery from, e.g. N10_D16 (default: largest N)",
+    )
+    parser.add_argument(
+        "--gallery-examples",
+        type=int,
+        default=3,
+        help="rows in the gallery, i.e. independent draws per category",
     )
     args = parser.parse_args()
 
@@ -385,7 +406,13 @@ def main() -> None:
     plot_generation_curves(rows, fig_dir / "degradation_generation.png")
     plot_reconstruction_curves(rows, fig_dir / "degradation_reconstruction.png")
     plot_loss_curves(summary, fig_dir / "loss_curves.png")
-    plot_gallery(summary, input_dir, fig_dir / "gallery.png", args.gallery_cell)
+    plot_gallery(
+        summary,
+        input_dir,
+        fig_dir / "gallery.png",
+        args.gallery_cell,
+        args.gallery_examples,
+    )
     print(f"Wrote tables and figures -> {fig_dir}")
 
 
