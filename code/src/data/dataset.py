@@ -19,7 +19,7 @@ import numpy as np
 import torch
 import trimesh
 
-from .normalize import normalize_mesh_to_unit_sphere
+from .normalize import make_watertight, normalize_mesh_to_unit_sphere
 from .sdf_sampling import sample_sdf_from_mesh, sample_surface_points
 from .synthetic import AnalyticShape, make_synthetic_collection
 from ..utils.log import status
@@ -61,8 +61,16 @@ def _samples_from_mesh(
     sigmas: tuple[float, float],
     num_surface_pc: int,
     rng: np.random.Generator,
+    watertight_pitch: float | None = 1.0 / 64.0,
 ) -> dict[str, Any]:
     mesh = normalize_mesh_to_unit_sphere(mesh)
+    if watertight_pitch is not None and not mesh.is_watertight:
+        # See make_watertight() docstring: raw ShapeNet meshes are typically
+        # dozens of disconnected shells with no well-defined inside, which
+        # makes the signed-distance *sign* (the actual training label) wrong
+        # for most points. Repair before sampling, not after.
+        mesh = make_watertight(mesh, pitch=watertight_pitch)
+        mesh = normalize_mesh_to_unit_sphere(mesh)  # re-center/-scale post-repair
     points, sdf = sample_sdf_from_mesh(
         mesh,
         num_points=num_points,
@@ -145,6 +153,10 @@ def build_shape_collection(
                 )
             )
     elif source == "mesh_dir":
+        # None disables the repair (e.g. for meshes already known watertight);
+        # default 1/64 matches the coarsest recon/eval marching-cubes grid used
+        # elsewhere, so it isn't the resolution bottleneck.
+        watertight_pitch = data_cfg.get("watertight_pitch", 1.0 / 64.0)
         meshes = _load_meshes_from_dir(Path(data_cfg.mesh_dir), limit=None)
         end = offset + num_shapes
         if len(meshes) < end:
@@ -171,6 +183,7 @@ def build_shape_collection(
                     sigmas=sigmas,
                     num_surface_pc=num_surface_pc,
                     rng=rng,
+                    watertight_pitch=watertight_pitch,
                 )
             )
             if verbose:

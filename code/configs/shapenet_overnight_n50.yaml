@@ -2,6 +2,19 @@
 # Primary real-data run. Decoder settings match validated shapenet_quick_n10.
 # Databricks: patch_mode=quality, g5.8xlarge, only-D 16 first.
 #
+# IMPORTANT FIX (found after chamfer=0.129/IoU=0.144 numbers still produced
+# fragmented/blobby chairs, and *more* decoder capacity made it worse despite
+# lower training loss): raw ShapeNet OBJs are not watertight -- a real chair
+# mesh checked directly had 313 disconnected shell fragments (seat/legs/back/
+# cushions never welded into one manifold surface). trimesh's signed-distance
+# sign query is close to meaningless on that: only ~1% of sampled points came
+# back "inside" a solid chair (should be ~30-40%). Since the sign IS the
+# DeepSDF training label, no decoder/optimizer tuning on top can fix this --
+# it explains low point-wise loss (fits whatever label it's given) coexisting
+# with incoherent extracted meshes. src/data/dataset.py now repairs non-
+# watertight meshes via voxelize+fill+re-mesh before SDF sampling, on by
+# default for every mesh_dir config (see src/data/normalize.py:make_watertight).
+#
 #   python scripts/run_grid.py --config configs/shapenet_overnight_n50.yaml \
 #       --output outputs/shapenet_overnight_n50 --only-D 16
 seed: 0
