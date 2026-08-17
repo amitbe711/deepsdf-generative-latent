@@ -5,7 +5,12 @@ Reads ``<output>/summary.json`` (produced by run_grid.py) and writes:
   * degradation_generation.png          - Coverage / MMD / 1-NN vs N,
   * degradation_reconstruction.png      - Chamfer / IoU vs N,
   * loss_curves.png                     - Stage-1 and DDPM training losses,
-  * gallery.png                         - reconstructions + Gaussian samples.
+  * gallery.png                         - GT / recon / one row per generator.
+
+The experiment grid is deliberately ragged (one latent dimension carries the
+N-sweep; any other D appears at a single N as an ablation), so the degradation
+figures plot only the sweep dimension and the table reports the ablation in a
+separate block. See ``main_sweep_dim``.
 
 Usage:
     python scripts/make_figures.py --input outputs/smoke --figures figures
@@ -25,13 +30,17 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import torch  # noqa: E402
+from mpl_toolkits.mplot3d.art3d import Poly3DCollection  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from src.data.dataset import _load_meshes_from_dir  # noqa: E402
+from src.data.normalize import make_watertight, normalize_mesh_to_unit_sphere  # noqa: E402
 from src.models.decoder import DeepSDFDecoder  # noqa: E402
-from src.models.gaussian_prior import GaussianPrior  # noqa: E402
-from src.sample import decode_point_cloud  # noqa: E402
+from src.sample import decode_mesh  # noqa: E402
+from src.train import fit_gaussian, fit_gmm, train_ddpm  # noqa: E402
 from src.utils import load_checkpoint  # noqa: E402
+from src.utils.config import AttrDict  # noqa: E402
 
 GEN_METRICS = [("coverage", "Coverage (higher better)"),
                ("mmd", "MMD-CD (lower better)"),
@@ -82,72 +91,107 @@ def write_csv(rows: list[dict], path: Path) -> None:
         writer.writerows(rows)
 
 
+def main_sweep_dim(rows: list[dict]) -> int:
+    """The D that carries the N-sweep (the one measured at the most values of N).
+
+    The experiment is deliberately ragged: one D spans every N, while any other D
+    appears at a single N as an ablation. Plotting them together would draw those
+    ablation cells as isolated one-point "curves", so the degradation figures use
+    only this D and the ablation is reported in the table instead.
+    """
+    per_dim = {}
+    for r in rows:
+        per_dim.setdefault(r["D"], set()).add(r["N"])
+    if not per_dim:
+        return 0
+    # Most N values wins; tie-break on the smaller D (the validated default).
+    return min(per_dim, key=lambda d: (-len(per_dim[d]), d))
+
+
+def _table_row(r: dict) -> str:
+    return (
+        f"{r['N']} & {r['D']} & {r['generator']} & "
+        f"{r['recon_chamfer']:.4f} & {r['recon_iou']:.3f} & "
+        f"{r['coverage']:.3f} & {r['mmd']:.4f} & {r['one_nn_acc']:.3f} & "
+        f"{r['valid_ratio']:.2f} \\\\"
+    )
+
+
 def write_latex_table(rows: list[dict], path: Path) -> None:
+    main_d = main_sweep_dim(rows)
+    ordered = sorted(rows, key=lambda x: (x["N"], x["D"], x["generator"]))
+    sweep = [r for r in ordered if r["D"] == main_d]
+    ablation = [r for r in ordered if r["D"] != main_d]
+
     lines = [
         r"\begin{tabular}{llrrrrrrr}",
         r"\toprule",
         r"$N$ & $D$ & Gen. & Recon-CD & IoU & Coverage & MMD & 1-NN & Valid \\",
         r"\midrule",
+        rf"\multicolumn{{9}}{{l}}{{\textit{{Main sweep ($D={main_d}$)}}}} \\",
     ]
-    for r in sorted(rows, key=lambda x: (x["N"], x["D"], x["generator"])):
-        lines.append(
-            f"{r['N']} & {r['D']} & {r['generator']} & "
-            f"{r['recon_chamfer']:.4f} & {r['recon_iou']:.3f} & "
-            f"{r['coverage']:.3f} & {r['mmd']:.4f} & {r['one_nn_acc']:.3f} & "
-            f"{r['valid_ratio']:.2f} \\\\"
-        )
+    lines += [_table_row(r) for r in sweep]
+    if ablation:
+        lines += [
+            r"\midrule",
+            r"\multicolumn{9}{l}{\textit{Latent-dimension ablation}} \\",
+        ]
+        lines += [_table_row(r) for r in ablation]
     lines += [r"\bottomrule", r"\end{tabular}"]
     path.write_text("\n".join(lines), encoding="utf-8")
 
 
 def plot_generation_curves(rows: list[dict], path: Path) -> None:
-    ds = sorted({r["D"] for r in rows})
-    gens = sorted({r["generator"] for r in rows})
-    fig, axes = plt.subplots(1, len(GEN_METRICS), figsize=(5 * len(GEN_METRICS), 4))
-    if len(GEN_METRICS) == 1:
-        axes = [axes]
-    for ax, (key, title) in zip(axes, GEN_METRICS):
+    # 2x2 rather than 1x4: the report is two-column, so a single wide strip of
+    # four panels shrinks past legibility even spanning both columns.
+    main_d = main_sweep_dim(rows)
+    sweep = [r for r in rows if r["D"] == main_d]
+    gens = sorted({r["generator"] for r in sweep})
+    fig, axes = plt.subplots(2, 2, figsize=(11, 8))
+    for ax, (key, title) in zip(axes.flat, GEN_METRICS):
         for gen in gens:
-            for d in ds:
-                sub = sorted(
-                    [r for r in rows if r["generator"] == gen and r["D"] == d],
-                    key=lambda x: x["N"],
-                )
-                if not sub:
-                    continue
-                xs = [r["N"] for r in sub]
-                ys = [r[key] for r in sub]
-                ax.plot(xs, ys, marker="o", label=f"{gen}, D={d}")
+            sub = sorted(
+                [r for r in sweep if r["generator"] == gen], key=lambda x: x["N"]
+            )
+            if not sub:
+                continue
+            ax.plot(
+                [r["N"] for r in sub],
+                [r[key] for r in sub],
+                marker="o",
+                label=gen,
+            )
         ax.set_xlabel("N (number of training shapes)")
         ax.set_title(title)
         ax.grid(True, alpha=0.3)
-        ax.legend(fontsize=8)
+        ax.legend(fontsize=9)
         # Mark the ideal 1-NN accuracy of 0.5 on its own panel.
-        if key == "one_nn_acc" and any(r["one_nn_acc"] == r["one_nn_acc"] for r in rows):
+        if key == "one_nn_acc" and any(r["one_nn_acc"] == r["one_nn_acc"] for r in sweep):
             ax.axhline(0.5, color="gray", linestyle="--", alpha=0.6)
+    fig.suptitle(f"Generation metrics vs. N (D={main_d})")
     fig.tight_layout()
     fig.savefig(path, dpi=150)
     plt.close(fig)
 
 
 def plot_reconstruction_curves(rows: list[dict], path: Path) -> None:
-    # Reconstruction is per (N, D); dedupe across generators.
+    # Reconstruction is a Stage-1 property, shared by the generators in a cell.
+    main_d = main_sweep_dim(rows)
     seen = {}
     for r in rows:
-        seen[(r["N"], r["D"])] = (r["recon_chamfer"], r["recon_iou"])
-    ds = sorted({d for (_, d) in seen})
+        if r["D"] == main_d:
+            seen[r["N"]] = (r["recon_chamfer"], r["recon_iou"])
+    items = sorted(seen.items())
     fig, axes = plt.subplots(1, 2, figsize=(10, 4))
-    for d in ds:
-        items = sorted([(n, v) for (n, dd), v in seen.items() if dd == d])
-        xs = [n for n, _ in items]
-        axes[0].plot(xs, [v[0] for _, v in items], marker="o", label=f"D={d}")
-        axes[1].plot(xs, [v[1] for _, v in items], marker="o", label=f"D={d}")
+    xs = [n for n, _ in items]
+    axes[0].plot(xs, [v[0] for _, v in items], marker="o")
+    axes[1].plot(xs, [v[1] for _, v in items], marker="o")
     axes[0].set_title("Reconstruction Chamfer (lower better)")
     axes[1].set_title("Reconstruction IoU (higher better)")
     for ax in axes:
         ax.set_xlabel("N (number of training shapes)")
         ax.grid(True, alpha=0.3)
-        ax.legend()
+    fig.suptitle(f"Reconstruction vs. N (D={main_d})")
     fig.tight_layout()
     fig.savefig(path, dpi=150)
     plt.close(fig)
@@ -179,14 +223,51 @@ def plot_loss_curves(summary: list[dict], path: Path) -> None:
     plt.close(fig)
 
 
-def _scatter(ax, pc: np.ndarray, title: str) -> None:
-    if pc is not None:
-        ax.scatter(pc[:, 0], pc[:, 1], pc[:, 2], s=1)
-    ax.set_title(title, fontsize=9)
+# Shaded-solid rendering constants. A sparse scatter of surface points reads as
+# a cloud of specks at figure scale; shading the actual triangles makes it legible
+# as a chair, which is the whole point of a qualitative figure.
+LIGHT_DIR = np.array([0.4, -0.8, 0.9]) / np.linalg.norm([0.4, -0.8, 0.9])
+FACE_COLOR = np.array([0.55, 0.70, 0.90])
+UP_AXIS_SWAP = [0, 2, 1]  # ShapeNet is Y-up; matplotlib's 3rd axis is vertical
+
+
+def _render_mesh(ax, mesh, title: str) -> None:
     ax.set_xlim(-1, 1)
     ax.set_ylim(-1, 1)
     ax.set_zlim(-1, 1)
+    # 3D axes reserve generous margins around the data box; with the axes hidden
+    # that reads as a tiny shape floating in whitespace, so zoom in on the box.
+    ax.set_box_aspect((1, 1, 1), zoom=1.45)
     ax.set_axis_off()
+    ax.view_init(elev=18, azim=-60)
+    ax.set_title(title, fontsize=9, pad=0)
+    if mesh is None or len(mesh.faces) == 0:
+        ax.text2D(0.35, 0.5, "fail", transform=ax.transAxes, fontsize=11)
+        return
+    verts = mesh.vertices[:, UP_AXIS_SWAP]
+    normals = mesh.face_normals[:, UP_AXIS_SWAP]
+    shade = np.clip(normals @ LIGHT_DIR, 0.25, 1.0)
+    colors = np.clip(shade[:, None] * FACE_COLOR[None, :], 0, 1)
+    ax.add_collection3d(
+        Poly3DCollection(verts[mesh.faces], facecolor=colors, edgecolor="none")
+    )
+
+
+def _ground_truth_meshes(cfg: dict, count: int) -> list:
+    """Training meshes under the same normalization + repair used for supervision."""
+    if str(cfg.get("data", {}).get("source", "")) != "mesh_dir":
+        return []
+    mesh_dir = Path(str(cfg["data"]["mesh_dir"]))
+    if not mesh_dir.exists():
+        return []
+    pitch = float(cfg["data"].get("watertight_pitch", 1.0 / 64.0))
+    meshes = []
+    for mesh in _load_meshes_from_dir(mesh_dir, limit=count):
+        mesh = normalize_mesh_to_unit_sphere(mesh)
+        if not mesh.is_watertight:
+            mesh = normalize_mesh_to_unit_sphere(make_watertight(mesh, pitch=pitch))
+        meshes.append(mesh)
+    return meshes
 
 
 def plot_gallery(summary: list[dict], input_dir: Path, path: Path) -> None:
@@ -198,10 +279,9 @@ def plot_gallery(summary: list[dict], input_dir: Path, path: Path) -> None:
         return
     ckpt = load_checkpoint(ckpt_path)
 
-    latent_dim = ckpt["latent_dim"]
     cfg = ckpt["config"]
     decoder = DeepSDFDecoder(
-        latent_dim=latent_dim,
+        latent_dim=ckpt["latent_dim"],
         hidden_dim=int(cfg["decoder"]["hidden_dim"]),
         num_layers=int(cfg["decoder"]["num_layers"]),
         skip_in=tuple(cfg["decoder"]["skip_in"]),
@@ -212,34 +292,53 @@ def plot_gallery(summary: list[dict], input_dir: Path, path: Path) -> None:
         init_radius=float(cfg["decoder"].get("init_radius", 0.5)),
     )
     decoder.load_state_dict(ckpt["decoder_state"])
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    decoder = decoder.to(device)
     decoder.eval()
 
     codes = ckpt["codes_state"]["embedding.weight"]
-    prior = GaussianPrior(
-        covariance=str(cfg["gaussian"]["covariance"]), reg=float(cfg["gaussian"]["reg"])
-    ).fit(codes)
-
-    res = int(cfg["eval"]["recon_resolution"])
-    n_pts = 1500
-    gen = torch.Generator().manual_seed(0)
-
+    attr_cfg = AttrDict(cfg)
+    # Coarse grids look blocky once rendered as a solid rather than as dots.
+    res = max(int(cfg["eval"]["recon_resolution"]), 64)
     columns = 4
-    fig = plt.figure(figsize=(4 * columns, 8))
-    # Row 1: reconstructions of training codes.
-    for c in range(columns):
-        ax = fig.add_subplot(2, columns, c + 1, projection="3d")
-        idx = min(c, codes.shape[0] - 1)
-        pc = decode_point_cloud(decoder, codes[idx], n_pts, resolution=res)
-        _scatter(ax, pc, f"recon z_{idx}")
-    # Row 2: Gaussian prior samples.
-    z_samples = prior.sample(columns, generator=gen)
-    for c in range(columns):
-        ax = fig.add_subplot(2, columns, columns + c + 1, projection="3d")
-        pc = decode_point_cloud(decoder, z_samples[c], n_pts, resolution=res)
-        _scatter(ax, pc, f"gaussian sample {c}")
-    fig.suptitle(f"Reconstructions & Gaussian samples ({tag})")
-    fig.tight_layout()
-    fig.savefig(path, dpi=150)
+
+    def decode(z):
+        return decode_mesh(decoder, z.detach().cpu(), resolution=res, device=device)
+
+    rows: list[tuple[str, list]] = []
+    gt = _ground_truth_meshes(cfg, columns)
+    if gt:
+        rows.append(("GT", gt))
+    rows.append(
+        ("Recon", [decode(codes[min(c, codes.shape[0] - 1)]) for c in range(columns)])
+    )
+
+    generators = list(cfg.get("grid", {}).get("generators", ["gaussian"]))
+    if "gaussian" in generators:
+        rng = torch.Generator().manual_seed(0)
+        z = fit_gaussian(attr_cfg, codes).sample(columns, generator=rng)
+        rows.append(("Gaussian", [decode(z[c]) for c in range(columns)]))
+    if "gmm" in generators:
+        rng = torch.Generator().manual_seed(1)
+        z = fit_gmm(attr_cfg, codes).sample(columns, generator=rng)
+        rows.append(("GMM", [decode(z[c]) for c in range(columns)]))
+    if "ddpm" in generators:
+        ddpm = train_ddpm(attr_cfg, codes, device=device, progress=False)["model"]
+        z = ddpm.sample(columns, device=device).cpu()
+        rows.append(("DDPM", [decode(z[c]) for c in range(columns)]))
+
+    fig = plt.figure(figsize=(2.9 * columns, 2.9 * len(rows)))
+    for r, (label, meshes) in enumerate(rows):
+        for c, mesh in enumerate(meshes):
+            ax = fig.add_subplot(
+                len(rows), columns, r * columns + c + 1, projection="3d"
+            )
+            _render_mesh(ax, mesh, f"{label} {c}")
+    fig.suptitle(f"Ground truth, reconstructions, and prior samples ({tag})")
+    fig.subplots_adjust(
+        left=0.01, right=0.99, top=0.95, bottom=0.01, wspace=0.0, hspace=0.12
+    )
+    fig.savefig(path, dpi=150, bbox_inches="tight")
     plt.close(fig)
 
 

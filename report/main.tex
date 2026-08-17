@@ -1,23 +1,59 @@
+% This must be in the first 5 lines to tell arXiv to use pdfLaTeX.
+\pdfoutput=1
+
 \documentclass[11pt]{article}
 
-% arXiv/NeurIPS-style single-column article. Compiles on Overleaf out of the box
-% (only standard packages). Swap in neurips_2024.sty if a specific style is required.
-\usepackage[margin=1in]{geometry}
+% "final" drops review line numbers and shows the named author. "nohyperref" keeps
+% this ACL2023 template compatible with the local Tectonic/XeTeX build.
+\usepackage[final,nohyperref]{ACL2023}
+
+% ACL2023.sty insets the abstract by 0.6cm on each side on top of the page
+% margins; override with a smaller inset so it reads at nearly full column width.
+\makeatletter
+\renewenvironment{abstract}%
+    {\vspace{-0.15cm}\centerline{\large\bf Abstract}%
+     \begin{list}{}%
+        {\setlength{\rightmargin}{0.1cm}%
+         \setlength{\leftmargin}{0.1cm}}%
+      \item[]\ignorespaces%
+      \@setsize\normalsize{12pt}\xpt\@xpt
+      }%
+    {\unskip\end{list}}
+\makeatother
+
+\usepackage{times}
+\usepackage{latexsym}
 \usepackage{amsmath,amssymb}
+\usepackage[capitalize]{cleveref}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+
+\usepackage{microtype}
+\usepackage{inconsolata}
+
+% Uniform inter-word spacing: without this, LaTeX adds extra stretchable space
+% after any period it guesses ends a sentence, which reads as distractingly wide
+% gaps once text is justified in a narrow two-column layout.
+\frenchspacing
+
 \usepackage{graphicx}
 \usepackage{booktabs}
-\usepackage{caption}
-\usepackage{subcaption}
-\usepackage{hyperref}
-\usepackage{natbib}
+\usepackage{float}
 \usepackage{xcolor}
 
 \graphicspath{{figures/}}
-\hypersetup{colorlinks=true, linkcolor=blue, citecolor=blue, urlcolor=blue}
 
-\title{\textbf{Generative Latent Models for DeepSDF:\\
-Gaussian vs.\ Diffusion in the Small-Data Regime}}
-\author{Amit Benbenishti \\ Deep Learning for 3D Computer Vision, Hebrew University of Jerusalem}
+% Deliberately loud: any empirical claim still awaiting the final grid numbers is
+% marked so it cannot be missed in a page-through before submission. Grep for
+% "TODO" in this file, or search the PDF, to find every remaining slot.
+\newcommand{\TODO}[1]{\textcolor{red}{\textbf{[TODO: #1]}}}
+
+\title{Generative Latent Models for DeepSDF:\\
+Gaussian vs.\ Diffusion in the Small-Data Regime}
+\author{Amit Benbenishti \\
+  Deep Learning for 3D Computer Vision \\
+  Hebrew University of Jerusalem}
 \date{\today}
 
 \begin{document}
@@ -29,13 +65,21 @@ per-shape latent code, but it does not learn a \emph{distribution} over those
 codes, so drawing new codes at random rarely decodes to a valid shape. Latent
 diffusion (3D-LDM~\citep{nam2022lion3dldm}) fixes this at full ShapeNet scale,
 but its benefit over a trivial Gaussian prior in the low-data, low-capacity
-regime is unstudied. We train a DeepSDF auto-decoder, freeze it, and fit three generators over the
-resulting codes---a multivariate Gaussian, a Gaussian mixture model (GMM), and
-a DDPM denoising the codes directly---and compare them on a controlled grid of
-dataset sizes $N \in \{10,50,150\}$ and latent dimensions $D \in \{16,32\}$ on
-ShapeNet chairs (synset 03001627). We evaluate reconstruction (Chamfer, IoU)
-and generation (Coverage, MMD, 1-NN accuracy). Synthetic parametric shapes are
-used only for pipeline smoke tests.
+regime is unstudied. We train a DeepSDF auto-decoder, freeze it, and fit three
+generators over the resulting codes---a multivariate Gaussian, a Gaussian mixture
+model (GMM), and a DDPM denoising the codes directly---then compare them as the
+dataset shrinks, $N \in \{10,50,150\}$, on ShapeNet chairs (synset 03001627),
+with latent dimension $D$ held fixed and ablated separately. We evaluate
+reconstruction (Chamfer, IoU) and generation (Coverage, MMD, 1-NN accuracy).
+\TODO{one sentence with the headline generator-comparison result}
+Along the way we report two findings that dominated the outcome: raw ShapeNet
+meshes are not watertight, which silently corrupts the SDF \emph{sign} that
+DeepSDF trains on, and once that is repaired, added decoder capacity lowers
+training loss while making the extracted geometry worse. In both cases the
+training loss improved while the extracted geometry degraded, which is the
+practical lesson we draw: on a pipeline that ends in Marching Cubes, point-wise
+loss is a weak proxy for surface quality. Synthetic parametric shapes are used
+only for pipeline smoke tests.
 \end{abstract}
 
 \section{Introduction and Related Work}
@@ -69,25 +113,43 @@ auto-decoders (ARAPReg~\citep{huang2021arapreg}).
 \paragraph{Our question and contribution.}
 All of the above operate at scale. We ask a controlled, resource-conscious
 question: \emph{on a real ShapeNet chair subset with small $N$ and modest $D$,
-when does a DDPM over DeepSDF codes beat simpler priors (Gaussian, GMM)?} We
-keep Stage~1 fixed and vary only the Stage~2 generator, sweeping $N$ and $D$ on
-ShapeNetCore chairs, and report reconstruction and distribution-level generation
-metrics \citep{achlioptas2018latentpc}. A rigorous negative result (simple priors
-$\approx$ diffusion at small $N$) is valid and informative. All training code is
-our own (see the code README and \texttt{src/thirdparty/}).
+when does a DDPM over DeepSDF codes beat simpler priors (Gaussian, GMM)?} We keep
+Stage~1 fixed and vary only the Stage~2 generator as $N$ shrinks on ShapeNetCore
+chairs, reporting reconstruction and distribution-level generation metrics
+\citep{achlioptas2018latentpc}. A rigorous negative result (simple priors
+$\approx$ diffusion at small $N$) is valid and informative.
+
+Our second contribution is diagnostic. Getting \emph{any} coherent chair out of
+this pipeline turned out to be dominated by two issues that are easy to
+misattribute to the generator or the optimizer: ShapeNet meshes are not
+watertight, so the SDF sign used as the training label is largely wrong
+(\cref{sec:watertight}); and once repaired, a wider decoder achieved lower
+training loss while producing \emph{worse} meshes (\cref{sec:failure-modes}). We
+document both, since either one silently caps the quality of every prior compared
+on top of it. All training code is our own (see the code README and
+\texttt{src/thirdparty/}).
 
 \section{Method}
 
 \subsection{Stage 1: DeepSDF auto-decoder}
 We assign each of the $N$ training shapes a latent code $\mathbf{z}_i \in
 \mathbb{R}^D$, initialized from $\mathcal{N}(0, 0.01^2)$, and share a decoder
-$f_\theta$. The decoder is an 8-layer MLP of width 512 with ReLU activations, a
-skip connection that re-injects the input $[\mathbf{z};\mathbf{x}]$ at layer~4,
-weight normalization, and a $\tanh$ on the scalar output. We initialize it with
-\emph{geometric initialization} \citep{atzmon2020sal, gropp2020igr} so that the
-network starts as an approximate sphere SDF; without this we observed the
-decoder collapsing to a spatially-constant field for some $(N,D)$ cells (no zero
-crossing, hence no extractable surface).
+$f_\theta$. The decoder has $8$ hidden layers of width $256$ with ReLU
+activations, a skip connection that re-injects the input
+$[\mathbf{z};\mathbf{x}]$ at layer~4, weight normalization on the hidden layers,
+and an unsquashed linear scalar output; dropout is disabled. DeepSDF's optional
+$\tanh$ output is available in our implementation but left off: the clamped loss
+of \cref{eq:stage1} already restricts supervision to the near-surface band, and
+the squashed output trained less reliably in our runs. Width $256$ rather than
+the paper's $512$ is a deliberate choice we return to in
+\cref{sec:failure-modes}, where added capacity \emph{hurt} the extracted
+geometry.
+
+We initialize with \emph{geometric initialization} \citep{atzmon2020sal,
+gropp2020igr}: the output layer starts as $\lVert\mathbf{x}\rVert - r$ with
+$r=0.5$, so the untrained network is an approximate sphere SDF. Without this the
+decoder can settle into a degenerate basin where the field is constant in space,
+never crosses zero, and yields no extractable surface.
 
 \paragraph{Sampling supervision.} For each normalized mesh (centered, scaled
 into the unit sphere) we sample points with $90\%$ near the surface (surface
@@ -97,14 +159,54 @@ uniformly in $[-1,1]^3$, and record their signed distances.
 \paragraph{Loss.} Following DeepSDF we minimize a clamped-$L_1$ reconstruction
 loss plus code regularization:
 \begin{equation}
+\label{eq:stage1}
+\begin{split}
 \mathcal{L} = \frac{1}{|B|}\sum_{(i,\mathbf{x})\in B}
-\bigl| \mathrm{clamp}(f_\theta(\mathbf{z}_i, \mathbf{x}), \delta)
-     - \mathrm{clamp}(s(\mathbf{x}), \delta) \bigr|
-\;+\; \lambda \, \frac{1}{|B|}\sum_i \lVert \mathbf{z}_i \rVert_2^2,
+  \bigl| \hat{f}_\theta(\mathbf{z}_i, \mathbf{x}) - \hat{s}(\mathbf{x}) \bigr| \\
+  {}+\; \lambda \, \frac{1}{|B|}\sum_i \lVert \mathbf{z}_i \rVert_2^2 ,
+\end{split}
 \end{equation}
-where $s(\mathbf{x})$ is the ground-truth SDF, $\delta=0.1$, and
-$\lambda=10^{-4}$. The decoder weights $\theta$ and the codes
-$\{\mathbf{z}_i\}$ are optimized jointly with Adam.
+where $s(\mathbf{x})$ is the ground-truth SDF, $\hat{a} \equiv
+\mathrm{clamp}(a,\delta) = \min(\delta, \max(-\delta, a))$ with $\delta=0.1$,
+and $\lambda=10^{-4}$. Clamping concentrates capacity on the near-surface band
+that Marching Cubes actually reads, rather than on far-field distances. The
+decoder weights $\theta$ and the codes $\{\mathbf{z}_i\}$ are optimized jointly
+with Adam.
+
+\subsection{Data preparation: making the SDF sign meaningful}
+\label{sec:watertight}
+The label in \cref{eq:stage1} is a \emph{signed} distance, so it presupposes a
+well-defined inside and outside --- that is, a closed surface. Raw ShapeNetCore
+OBJs do not satisfy this. They are assembled \emph{shells} rather than solids: a
+representative chair from synset \texttt{03001627} decomposes into $313$
+disconnected components (seat, each leg, back, cushions) that are never welded
+into one manifold. On such input, \texttt{trimesh}'s winding-number signed-distance
+query has no coherent interior to test against and its sign becomes close to
+meaningless. Measured on one chair, only $\approx 1\%$ of sampled points were
+labelled inside; after the repair below, the \emph{same} sample locations gave
+$\approx 38\%$.
+
+This is a training-\emph{data} bug, and it has a specific failure signature. With
+nearly every near-surface label positive, the network is asked to fit something
+closer to an unsigned distance field with almost no interior, so its zero level
+set is not a closed surface and Marching Cubes returns disconnected fragments.
+Meanwhile the point-wise loss stays low --- the decoder faithfully fits the labels
+it was given --- so the monitored training metric never reveals the problem. No
+amount of decoder or optimizer tuning downstream can repair a corrupted label.
+
+\paragraph{Repair.} We voxelize the normalized mesh at pitch $1/64$, fill the
+interior, and re-mesh the filled occupancy grid with Marching Cubes
+(\texttt{make\_watertight} in \texttt{src/data/normalize.py}). This yields a
+single closed manifold solid regardless of how broken the input topology was; we
+re-normalize afterwards because voxelization shifts the bounding box slightly. The
+repair is applied per mesh only when \texttt{trimesh} reports the input as
+non-watertight, and is covered by a unit test on a deliberately fragmented mesh.
+
+The trade-off is that detail thinner than the pitch is lost --- thin slats and
+spindles thicken or merge. We accept it deliberately: a slightly thickened chair
+with correct signs is a learnable target, whereas a perfectly detailed chair with
+arbitrary signs is not. The cost is preprocessing time, which dominates the data
+build at $N=150$.
 
 \subsection{Stage 2: generative priors over frozen codes}
 We freeze $f_\theta$ and $\{\mathbf{z}_i\}$ and fit three generators.
@@ -139,15 +241,40 @@ which we sample a surface point cloud for the metrics.
 \section{Evaluation and Results}
 
 \subsection{Setup}
-We sweep $N \in \{10, 50, 150\}$ and $D \in \{16, 32\}$ on ShapeNetCore v2
-chairs (synset \texttt{03001627}). For each cell we train Stage~1 (8000
-iterations, 512-wide decoder, geometric initialization), then fit Gaussian, GMM,
-and DDPM priors. Meshes are normalized to the unit sphere; SDF supervision uses
-8000 points per shape (90\% near-surface, 10\% uniform). Held-out meshes
-(offset by $N$ in the directory listing) form the reference set for generation
-metrics. Hyper-parameters and the full grid are in \texttt{configs/shapenet\_grid.yaml}
-and reproduced by \texttt{scripts/run\_grid.py} on Databricks (A10G); figures
-are produced with \texttt{scripts/make\_figures.py}.
+\label{sec:setup}
+All experiments use ShapeNetCore chairs (synset \texttt{03001627}).
+
+\paragraph{Experimental design.} The proposal specified a full $N\times D$ grid.
+We instead run the $N$-sweep at a \emph{fixed} $D$ and treat $D$ as a single
+ablation. The reason is an earlier observation, made before the mesh repair of
+\cref{sec:watertight} was in place: at $N=50$, raising $D$ from $16$ to $32$
+\emph{degraded} reconstruction Chamfer rather than improving it, echoing the
+decoder-width result of \cref{sec:failure-modes}. Since both capacity axes pointed
+the same way, crossing $D$ with every $N$ would largely re-measure one effect three
+times. The main sweep is therefore $N \in \{10, 50, 150\}$ at $D=16$ (three cells,
+each with all three generators), plus one $D=32$ cell at $N=50$ re-measured under
+the repaired pipeline (\cref{sec:ablation}) so the ablation is comparable to the
+rest of the results. This keeps the comparison the paper is actually about ---
+Gaussian vs.\ GMM vs.\ DDPM as $N$ shrinks --- free of a confounded capacity axis.
+
+\paragraph{Training.} Each cell trains Stage~1 for $8000$ iterations with Adam
+(learning rate $10^{-3}$ for both decoder and codes), sampling $48$ shapes and
+$1024$ points per shape per iteration, then fits the three Stage-2 generators on
+the frozen codes. The GMM uses $K=5$ components (capped so no component receives
+fewer than $5$ codes). The DDPM uses $200$ timesteps with a cosine schedule
+\citep{nichol2021improvedddpm}, a $4$-layer width-$256$ MLP with a $64$-d
+sinusoidal time embedding, trained $3000$ iterations at learning rate $10^{-3}$.
+
+\paragraph{Data and evaluation.} Meshes are normalized to the unit sphere and
+repaired (\cref{sec:watertight}); SDF supervision uses $8000$ points per shape
+($90\%$ near-surface, $10\%$ uniform). Reconstruction is measured on up to $10$
+training shapes per cell at Marching-Cubes resolution $48^3$ (IoU at $32^3$). For
+generation we draw $40$ samples per generator and compare against $40$ held-out
+chairs, disjoint from training by construction (offset by $N$ in the directory
+listing). Hyper-parameters live in \texttt{configs/shapenet\_grid.yaml};
+\texttt{scripts/run\_grid.py} reproduces every cell on a single Colab GPU
+(T4/A100) and \texttt{scripts/make\_figures.py} regenerates every table and
+figure in this section from the resulting \texttt{summary.json}.
 
 \subsection{Metrics}
 \textbf{Reconstruction:} Chamfer distance and volumetric IoU between each decoded
@@ -159,93 +286,219 @@ diversity/mode coverage), \emph{MMD} (minimum matching distance, measures
 fidelity), and \emph{1-NN accuracy} (a two-sample test; $0.5$ is ideal,
 indicating the generated and real distributions are indistinguishable).
 
-\subsection{Quantitative results}
-Table~\ref{tab:results} reports all metrics across the grid.
-Figure~\ref{fig:degradation} shows how generation quality changes with $N$ for
-each generator and $D$, and Figure~\ref{fig:recon} the reconstruction trend.
-Training curves are in Figure~\ref{fig:loss} and qualitative samples in
-Figure~\ref{fig:gallery}.
+\subsection{Failure modes and what they diagnosed}
+\label{sec:failure-modes}
+Most of the effort in this project went into obtaining \emph{any} coherent
+geometry, not into the generator comparison. We report the failures because each
+one is easy to misattribute, and two of them are only visible if you look at the
+extracted surface rather than the loss.
 
-\begin{table}[t]
+\paragraph{Latent-code collapse.} In several configurations the mean code norm
+decayed toward zero (e.g.\ from $0.036$ to $0.0005$ within $2000$ iterations),
+after which the decoder ignores $\mathbf{z}$ and emits one average shape. The
+cause is an interaction between two individually sensible choices. Geometric
+initialization deliberately zeroes the latent columns of the first layer so the
+initial field is a code-independent sphere --- but then
+$\partial\mathcal{L}_{\text{recon}}/\partial\mathbf{z}$ is \emph{exactly} zero at
+step~1, and the only gradient reaching the codes is the regularizer $\lambda
+\lVert\mathbf{z}\rVert^2$ pulling them to the origin. Training becomes a race
+between the codes bootstrapping a nonzero coupling and the regularizer erasing
+them.
+
+The instructive part is that simply enlarging that initialization was not enough:
+raising the latent-column standard deviation $100\times$ (from $10^{-4}$ to
+$10^{-2}$) still collapsed at the \emph{same rate} at width $512$. Adam
+normalizes each parameter's step by its own gradient RMS, so it moves in whichever
+direction is most \emph{consistent} over time, largely irrespective of raw
+gradient magnitude. The regularizer supplies a tiny but perfectly consistent pull
+toward zero at every step, which a weak and noisy reconstruction signal loses to
+even at comparable magnitude. What fixed it was removing the competing force
+during the critical window: a linear warmup ramping $\lambda$ from $0$ over the
+first iterations (\texttt{code\_reg\_warmup\_iters}), together with the larger
+latent-column init.
+
+\paragraph{Optimizer sensitivity to width.} At width $512$, a learning rate of
+$10^{-3}$ for both decoder and codes stalled training outright --- the
+reconstruction loss stayed flat near $0.09$ while $\lVert\mathbf{z}\rVert$
+collapsed. Reducing to $3\times10^{-4}$ restored normal training. Wider
+weight-normalized layers simply did not tolerate the learning rate that worked at
+width $256$.
+
+\paragraph{Eikonal regularization: a scale-mismatch trap.} We also tried adding
+the unit-gradient penalty $(\lVert\nabla_{\mathbf{x}} f\rVert - 1)^2$ used by IGR
+\citep{gropp2020igr}. At the literature default weight of $0.1$ it destroyed
+training: the clamped-$L_1$ data term is $O(\delta) = O(10^{-2})$, whereas the
+eikonal term is unclamped and $O(1)$, so the regularizer dominated the objective
+by roughly an order of magnitude and drove the field to a degenerate,
+nearly-code-independent solution with no zero crossing inside the evaluation cube.
+The default assumes an unclamped data loss of comparable scale; with clamping, the
+weight must be scaled down by roughly $\delta$. We ultimately trained without it.
+
+\paragraph{The capacity paradox, and what it revealed.} Widening the decoder from
+$256$ to $512$ reduced the training loss yet produced \emph{worse} Chamfer, worse
+IoU, and visibly worse meshes. That combination is diagnostic rather than merely
+disappointing: a model that fits its labels better while producing worse geometry
+implies the labels disagree with the geometry. This is what sent us to audit the
+supervision itself, where the sign turned out to be wrong for roughly $99\%$ of
+sampled points (\cref{sec:watertight}). We note the ordering honestly --- capacity
+and optimizer changes were attempted first and did not help --- because the
+\emph{pattern} of failure, not any single metric, is what identified the cause.
+It also explains why we keep width at $256$: until the label bug was fixed, extra
+capacity only fit the wrong target more precisely.
+
+\subsection{Quantitative results}
+\label{sec:quantitative}
+\Cref{tab:results} reports every metric. \Cref{fig:degradation} shows how
+generation quality changes with $N$ for each generator at $D=16$, and
+\cref{fig:recon} the corresponding reconstruction trend. Training curves are in
+\cref{fig:loss} and qualitative samples in \cref{fig:gallery}.
+
+\begin{table*}[t]
 \centering
-\caption{Reconstruction and generation metrics across the $N\times D$ grid.
-Recon-CD and MMD are lower-is-better; IoU and Coverage higher-is-better; 1-NN
-accuracy is best near $0.5$.}
+\caption{Reconstruction and generation metrics. Recon-CD and MMD are
+lower-is-better; IoU and Coverage higher-is-better; 1-NN accuracy is best near
+$0.5$. Reconstruction is a property of Stage~1 and is therefore shared by the
+three generators within a cell.}
 \label{tab:results}
 \input{figures/results_table.tex}
-\end{table}
+\end{table*}
 
-\begin{figure}[t]
+\begin{figure*}[t]
 \centering
 \includegraphics[width=\textwidth]{degradation_generation.png}
-\caption{Generation metrics vs.\ number of training shapes $N$, per generator
-and latent dimension $D$. The dashed line marks the ideal 1-NN accuracy of
-$0.5$.}
+\caption{Generation metrics vs.\ number of training shapes $N$, per generator,
+at the fixed latent dimension $D=16$. The dashed line marks the ideal 1-NN
+accuracy of $0.5$.}
 \label{fig:degradation}
-\end{figure}
+\end{figure*}
 
-\begin{figure}[t]
+\begin{figure*}[t]
 \centering
 \includegraphics[width=\textwidth]{degradation_reconstruction.png}
-\caption{Reconstruction Chamfer distance and IoU vs.\ $N$ for each latent
-dimension $D$.}
+\caption{Reconstruction Chamfer distance and IoU vs.\ $N$ at $D=16$.}
 \label{fig:recon}
-\end{figure}
+\end{figure*}
 
-\begin{figure}[t]
+\begin{figure*}[t]
 \centering
 \includegraphics[width=\textwidth]{loss_curves.png}
 \caption{Stage-1 clamped-$L_1$ reconstruction loss and Stage-2 DDPM
-noise-prediction loss for each grid cell.}
+noise-prediction loss for each cell.}
 \label{fig:loss}
-\end{figure}
+\end{figure*}
 
-\begin{figure}[t]
+\begin{figure*}[t]
 \centering
 \includegraphics[width=\textwidth]{gallery.png}
-\caption{Qualitative ShapeNet results: ground truth (top), reconstructions,
-Gaussian, GMM, and DDPM samples (see \texttt{gallery\_*.png} on S3).}
+\caption{Qualitative ShapeNet results, rendered as shaded solids. Rows:
+ground-truth chair, reconstruction from its learned code, then samples from the
+Gaussian, GMM, and DDPM priors.}
 \label{fig:gallery}
-\end{figure}
+\end{figure*}
+
+\subsection{Ablation: latent dimension}
+\label{sec:ablation}
+The final block of \cref{tab:results} reports the $D=32$ cell at $N=50$, to be
+compared against the $D=16$ cell at the same $N$. Doubling the latent dimension
+doubles the per-shape capacity available to Stage~1 while leaving the decoder and
+the training budget unchanged, so it is the cheapest available test of whether the
+codes --- rather than the decoder --- were the bottleneck. It also determines
+whether a $D$-sweep is worth spending the remaining compute on: if $D=32$ does not
+help at the middle $N$, crossing $D$ with every $N$ mostly re-measures the same
+effect.
 
 \subsection{Discussion}
-Table~\ref{tab:results} and Figures~\ref{fig:degradation}--\ref{fig:gallery}
-summarize the ShapeNet grid once \texttt{shapenet\_grid} completes. We expect
-the following patterns (to be confirmed by the final numbers):
 
-\paragraph{Reconstruction.} Stage~1 should reach low clamped-$L_1$ loss; Chamfer
-and IoU on decoded meshes indicate whether the field crosses zero reliably on
-real chairs (harder than analytic smoke shapes). Geometric initialization remains
-necessary---without it some cells collapse to a spatially constant field.
+\paragraph{How much of the budget reaches the surface.} Two quantities have to be
+read together in \cref{tab:results}. Reconstruction Chamfer/IoU bound what
+\emph{any} prior can achieve, because a sampled code is decoded by the same
+network: if the training codes themselves do not decode cleanly, no prior over
+those codes can. The valid ratio then says how often a sampled code produces an
+extractable surface at all. A generator can look strong on Coverage and MMD while
+quietly failing on a large fraction of its samples, since those metrics are
+computed only over samples that yielded a mesh. We therefore treat valid ratio as
+a first-class result rather than a diagnostic.
+\TODO{state reconstruction CD/IoU and the valid-ratio range actually observed}
 
-\paragraph{Generation priors.} With small $N$, the empirical code distribution is
-close to unimodal and a plain Gaussian may match or beat diffusion on 1-NN
-accuracy (ideal $0.5$). The GMM adds capacity without diffusion overhead and may
-improve Coverage when codes form a few clusters. DDPM should gain at larger $N$
-if the code distribution is visibly non-Gaussian; at $N=50$ we treat any DDPM
-advantage on Coverage as evidence that diffusion captures multi-modality, while
-high 1-NN (far from $0.5$) indicates generated and reference sets remain
-distinguishable---expected under a small-data budget.
+\paragraph{Do the priors differ at all?} This is the paper's question, and the
+informative outcome may well be a negative one. At small $N$ the empirical code
+distribution is a handful of points in $\mathbb{R}^{16}$; a full-covariance
+Gaussian already has $D + D(D{+}1)/2 = 152$ parameters to fit
+$N$ vectors, so the mixture and the diffusion model are being asked to find
+structure in a sample that may not support it. If the three priors are within
+noise of each other, the practical conclusion is that diffusion's extra machinery
+buys nothing in this regime --- which is precisely the claim the proposal set out
+to test, and it inverts the usual reading of 3D-LDM's result by showing where its
+advantage comes from (scale) rather than disputing it.
+\TODO{compare the three generators on Coverage/MMD/1-NN; say whether the gaps
+exceed the spread across $N$, and note any consistent ordering}
 
-\paragraph{Qualitative gallery.} Figure~\ref{fig:gallery} shows ground-truth
-chairs, reconstructions from learned codes, and samples from each prior. Failed
-decodes (degenerate iso-surfaces) appear as point-like clouds and correlate with
-high Chamfer; these runs should be discarded or re-run with full decoder width
-(\texttt{patch\_mode=quality}).
+\paragraph{The 1-NN sanity check.} 1-NN accuracy is the strictest of the three
+generation metrics: $0.5$ means a classifier cannot tell generated shapes from
+real ones, and values near $1.0$ mean it always can. Under a budget of $40$
+samples against $40$ references, and with reconstructions that are themselves
+imperfect, we expect values far above $0.5$ --- a reminder that Coverage and MMD
+alone can flatter a generator whose samples are individually implausible.
+\TODO{report the 1-NN range and whether any generator approaches $0.5$}
+
+\paragraph{Trend with $N$.} More shapes cut two ways here. The prior sees a larger
+sample, which should help it, but Stage~1 must fit more geometry with a fixed
+decoder and a fixed iteration budget, which should hurt reconstruction --- and
+reconstruction quality caps everything downstream. \Cref{fig:degradation} and
+\cref{fig:recon} separate these effects.
+\TODO{state which effect dominates between $N=10$ and $N=150$}
+
+\paragraph{Latent dimension.} \Cref{sec:ablation} compares $D=32$ against $D=16$
+at $N=50$ under the repaired pipeline.
+\TODO{report whether $D=32$ helps, hurts, or is neutral, and reconcile with the
+pre-repair observation that motivated fixing $D=16$}
+
+\paragraph{Qualitative gallery.} \Cref{fig:gallery} is the check that the metrics
+cannot provide. Chamfer distance between surface point clouds is fairly forgiving
+of a shape that has roughly the right mass in roughly the right places, so a
+recognizable chair and a plausible-but-wrong blob can score similarly. Reading the
+gallery alongside the table is what caught the label bug of
+\cref{sec:watertight} in the first place: the numbers were unremarkable while the
+meshes were fragments. Failed decodes are drawn as an explicit \emph{fail} marker
+rather than silently omitted, so the figure and the valid ratio agree.
+\TODO{describe what the samples actually look like per prior --- coherence,
+diversity, mode collapse, and any visible difference between GMM and DDPM}
 
 \section{Conclusion}
 We compared Gaussian, GMM, and DDPM priors over frozen DeepSDF codes on a
-ShapeNet chair subset across $N \in \{10,50,150\}$ and $D \in \{16,32\}$. The
-goal was not state of the art but a controlled answer to when diffusion is worth
-its complexity on real meshes under a modest compute budget. Limitations include
-mesh preprocessing cost, sensitivity of Marching Cubes to under-trained fields,
-and the restricted synset size; future work could scale $N$ within the chairs
-category and add flow-based priors.
+ShapeNet chair subset as the dataset shrank, $N \in \{10,50,150\}$ at $D=16$,
+with $D=32$ ablated separately. The goal was not state of the art but a
+controlled answer to when diffusion is worth its complexity on real meshes under
+a modest compute budget.
+\TODO{answer the question in one or two sentences, with the numbers that support
+it}
 
-\bibliographystyle{plainnat}
+The most transferable lesson is not about the priors at all. Two failures
+dominated our results, and both presented as \emph{optimization} problems while
+actually being something else: non-watertight input meshes corrupting the SDF
+sign that DeepSDF trains on (\cref{sec:watertight}), and added capacity
+simultaneously lowering training loss and worsening extracted geometry
+(\cref{sec:failure-modes}). In both cases the training loss --- the quantity one
+naturally monitors --- moved in the reassuring direction while the artifact we
+cared about got worse. On a pipeline that ends in Marching Cubes, point-wise loss
+is a weak proxy for the surface, and geometry has to be inspected directly.
+
+Limitations include the cost of mesh repair, the sensitivity of Marching Cubes to
+under-trained fields, the single synset, and the modest sample counts behind the
+generation metrics ($40$ samples against $40$ references), which limits how
+finely Coverage and 1-NN accuracy can be resolved. Future work could scale $N$
+within the chairs category, retune the optimizer for wider decoders instead of
+fixing width, and add flow-based priors as a fourth point on the
+minimal-to-expressive spectrum.
+
+\small
+\setlength{\bibsep}{1pt}
 \bibliography{references}
+\bibliographystyle{acl_natbib}
+\normalsize
 
 \appendix
+\onecolumn
 \section{Original Proposal}
 The approved project proposal is reproduced below.
 \input{proposal_appendix.tex}

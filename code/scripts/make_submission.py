@@ -21,8 +21,17 @@ _SKIP_DIRS = {"__pycache__", ".pytest_cache", "outputs", "figures_smoke", ".ipyn
 _SKIP_SUFFIXES = {".pyc", ".log"}
 
 # Only these report artifacts are packaged (avoids bundling unrelated files that
-# may sit in report/). main.pdf is added separately when present.
-_REPORT_FILES = ("main.tex", "references.bib", "proposal_appendix.tex", "README.md")
+# may sit in report/). main.pdf is added separately when present. The .sty/.bst
+# are vendored ACL template files and must ship, or the LaTeX source we hand in
+# will not compile for anyone else.
+_REPORT_FILES = (
+    "main.tex",
+    "references.bib",
+    "proposal_appendix.tex",
+    "README.md",
+    "acl2023.sty",
+    "acl_natbib.bst",
+)
 
 
 def _should_skip(path: Path) -> bool:
@@ -86,9 +95,9 @@ def main() -> None:
     print(f"Wrote {zip_path} ({n_code} code files, {n_report} report files).")
     if not pdf.exists():
         print(
-            "[note] report/main.pdf not found. Compile the report on Overleaf and\n"
-            "       place main.pdf in Final_Project/report/, then re-run this script\n"
-            "       so the PDF is included in the submission zip."
+            "[note] report/main.pdf not found. Build it with `cd report && tectonic\n"
+            "       main.tex` (or on Overleaf, exporting main.pdf into report/), then\n"
+            "       re-run this script so the PDF is included in the submission zip."
         )
 
 
