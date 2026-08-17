@@ -208,6 +208,23 @@ $D=16$. The dashed line marks the ideal 1-NN accuracy of $0.5$.}
 \label{fig:degradation}
 \end{figure*}
 
+% Declared here rather than beside its discussion: a figure* can only occupy the
+% top of a page, and by the time the discussion is typeset the next available top
+% has already been committed, which strands the figure after the bibliography.
+\begin{figure*}[t]
+\centering
+\includegraphics[width=\textwidth]{gallery.png}
+\caption{Qualitative results at $N=150$, $D=16$, as shaded solids. Columns:
+ground-truth chair, its reconstruction from the learned code, then one sample
+each from the Gaussian, GMM, and DDPM priors; rows are independent draws.
+Reconstructions preserve the coarse massing but lose thin structure --- the sled
+legs of row~1 and the back slats of row~2 --- and fare best on the bulky armchair
+of row~3. All three priors emit chair-like solids at this $N$, consistent with
+the valid ratio of $1.00$ in \cref{tab:results}, with visible holes and melted
+detail.}
+\label{fig:gallery}
+\end{figure*}
+
 \paragraph{The simplest priors win.} \Cref{tab:results} and
 \cref{fig:degradation} report the sweep. The GMM attains the highest Coverage at
 every $N$ ($0.325$, $0.300$, $0.400$) and the Gaussian is close behind ($0.250$,
@@ -256,28 +273,27 @@ describe a closed solid, capacity behaves as expected. The caveat is that we
 re-tested only the latent dimension; the width-$512$ decoder that showed the same
 inversion was never re-run post-repair.
 
-\begin{figure}[t]
-\centering
-\includegraphics[width=\columnwidth]{gallery.png}
-\caption{Qualitative results at $N=10$, $D=16$, as shaded solids. Rows:
-ground-truth chair, reconstruction from its learned code, then Gaussian, GMM, and
-DDPM samples. Reconstructions keep the coarse massing but lose thin structure.
-Every DDPM sample failed to produce a surface --- the $0.15$ valid ratio of
-\cref{tab:results} made visible.}
-\label{fig:gallery}
-\end{figure}
-
 \paragraph{What the samples look like.} \Cref{fig:gallery} is the check the
 metrics cannot provide, since Chamfer distance is forgiving of a shape with
-roughly the right mass in roughly the right places. Reconstructions recover the
-seat-and-back massing while losing thin structure, which is what caps 1-NN
-accuracy well above $0.5$. Gaussian and GMM samples are chair-like in silhouette
-and clearly varied, with no visible mode collapse, but several have holes or
-detached fragments --- hence reasonable Coverage alongside trivial separability.
-The DDPM row contains no geometry at all. That is the result in one image: at
-$N=10$, the two priors that \emph{assume} a shape for the code distribution still
-produce chairs, and the one that tries to learn that shape from ten examples
-produces nothing.
+roughly the right mass in roughly the right places. Reconstruction degrades
+exactly where the repair of \cref{sec:watertight} predicts: the bulky armchair
+survives well, while the sled legs and back slats --- structures thinner than the
+$1/64$ voxel pitch --- are thickened, holed, or lost. That is what holds 1-NN
+accuracy near $1.0$ regardless of the prior, and it is a Stage-1 ceiling no
+generator can lift.
+
+The priors are harder to separate by eye than the table suggests. All three emit
+chair-like solids with recognizable seats and backs, all three show the same
+melted surfaces and holes, and all three occasionally emit something degenerate:
+a spindly frame with no seat (Gaussian, row~2), a flattened slab (GMM, row~3).
+We think this is the honest reading rather than a limitation of the figure. The
+measured gaps at $N=150$ are \emph{distributional} --- Coverage $0.400$ for the
+GMM against $0.225$ for the DDPM --- and three draws per prior cannot resolve a
+difference in how much of the reference set gets matched. Per-sample
+plausibility, which is what the eye judges here, is roughly comparable. The
+contrast with $N=10$ is the point: there the DDPM's deficit was catastrophic and
+obvious, producing no surface at all, whereas at $N=150$ it has become a
+diversity deficit that only the metrics expose.
 
 \paragraph{Training pathologies.} Two failures cost most of the project's time
 and are worth recording. Geometric initialization zeroes the latent columns of
