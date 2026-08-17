@@ -386,6 +386,23 @@ def run_cell(
     return results
 
 
+def _cell_tag(num_shapes: int, latent_dim: int) -> str:
+    return f"N{num_shapes}_D{latent_dim}"
+
+
+def _load_json(path: Path) -> dict | list | None:
+    if not path.exists():
+        return None
+    with open(path, encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def _write_summary(output_dir: Path, summary_by_tag: dict[str, dict]) -> None:
+    ordered = sorted(summary_by_tag.values(), key=lambda r: (r["N"], r["D"]))
+    with open(output_dir / "summary.json", "w", encoding="utf-8") as handle:
+        json.dump(ordered, handle, indent=2)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=str, default="configs/base.yaml")
@@ -393,6 +410,11 @@ def main() -> None:
     parser.add_argument("--only-N", type=int, default=None, help="run a single N")
     parser.add_argument("--only-D", type=int, default=None, help="run a single D")
     parser.add_argument("--quiet", action="store_true", help="suppress step-by-step status")
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="re-run cells even if a metrics.json already exists for them",
+    )
     args = parser.parse_args()
 
     cfg = load_config(args.config)
@@ -411,20 +433,39 @@ def main() -> None:
         f"cells={total} N={grid_n} D={grid_d} output={output_dir}"
     )
 
-    summary = []
+    # Resumable across separate invocations/sessions: reload whatever summary
+    # already exists (e.g. from a prior --only-N/--only-D chunk, or a run that
+    # got interrupted) and merge into it by (N, D) tag, instead of starting
+    # from an empty list and clobbering earlier cells' results. Combined with
+    # writing summary.json after every cell (not just at the end), a crashed
+    # or disconnected session never loses already-completed cells.
+    summary_by_tag: dict[str, dict] = {}
+    for entry in _load_json(output_dir / "summary.json") or []:
+        summary_by_tag[_cell_tag(entry["N"], entry["D"])] = entry
+
     grid_t0 = time.time()
     for idx, (num_shapes, latent_dim) in enumerate(cells, start=1):
-        results = run_cell(
-            cfg,
-            num_shapes,
-            latent_dim,
-            output_dir,
-            device,
-            cell_index=idx,
-            cell_total=total,
-            verbose=verbose,
-        )
-        summary.append(results)
+        tag = _cell_tag(num_shapes, latent_dim)
+        existing = None if args.force else _load_json(output_dir / tag / "metrics.json")
+        if existing is not None:
+            status(
+                f"grid cell {idx}/{total}: {tag} already has metrics.json -- "
+                "reusing it (pass --force to re-run)"
+            )
+            results = existing
+        else:
+            results = run_cell(
+                cfg,
+                num_shapes,
+                latent_dim,
+                output_dir,
+                device,
+                cell_index=idx,
+                cell_total=total,
+                verbose=verbose,
+            )
+        summary_by_tag[tag] = results
+        _write_summary(output_dir, summary_by_tag)
         elapsed = time.time() - grid_t0
         avg = elapsed / idx
         remaining = avg * (total - idx)
@@ -433,8 +474,6 @@ def main() -> None:
             f"elapsed={format_duration(elapsed)} eta={format_duration(remaining)}"
         )
 
-    with open(output_dir / "summary.json", "w", encoding="utf-8") as handle:
-        json.dump(summary, handle, indent=2)
     status(f"grid complete in {format_duration(time.time() - grid_t0)} -> {output_dir / 'summary.json'}")
 
 
