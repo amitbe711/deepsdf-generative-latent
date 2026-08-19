@@ -2,9 +2,38 @@
 
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 import trimesh
 from scipy.spatial import cKDTree
+
+_warned_no_embree = False
+
+
+def _warn_if_slow_contains(resolution: int) -> None:
+    """Flag the single-biggest footgun in this file: mesh.contains() without embree.
+
+    Without the embreex package, trimesh's ray-mesh intersector falls back to a
+    pure-Python ray-triangle test that is not just slow but effectively
+    unbounded in memory -- verified directly: ~0.4s with embreex vs 200+s (and
+    an OOM kernel crash on Colab) without it, for a single mesh at
+    resolution=64. That failure mode is a silent hang/crash with no useful
+    traceback, so warn loudly and immediately instead.
+    """
+    global _warned_no_embree
+    if _warned_no_embree or trimesh.ray.has_embree or resolution < 48:
+        return
+    warnings.warn(
+        f"embreex is not installed and iou_resolution={resolution} >= 48: "
+        "mesh.contains() will use trimesh's pure-Python ray-triangle fallback, "
+        "which is orders of magnitude slower and can exhaust memory (verified "
+        "to OOM-crash a Colab kernel at resolution=64). Run `pip install "
+        "embreex` (already in requirements.txt) before a real evaluation.",
+        RuntimeWarning,
+        stacklevel=2,
+    )
+    _warned_no_embree = True
 
 
 def chamfer_distance(points_a: np.ndarray, points_b: np.ndarray) -> float:
@@ -32,6 +61,7 @@ def iou_from_meshes(
     Occupancy is computed with mesh containment tests. Both meshes should be
     (approximately) watertight; Marching-Cubes outputs and analytic shapes are.
     """
+    _warn_if_slow_contains(resolution)
     axis = np.linspace(-bound, bound, resolution, dtype=np.float32)
     grid = np.stack(np.meshgrid(axis, axis, axis, indexing="ij"), axis=-1).reshape(-1, 3)
 

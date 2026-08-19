@@ -8,6 +8,11 @@ charset-normalizer>=3.0  # required by trimesh for some OBJ/MTL loads
 rtree>=1.0           # spatial index backend for trimesh proximity (mesh->SDF)
 scikit-image>=0.21   # marching cubes
 scipy>=1.10          # KDTree for Chamfer / metrics
+embreex>=2.17        # fast ray-mesh intersector; without it, mesh.contains()
+                     # (volumetric IoU) falls back to a pure-Python ray-triangle
+                     # test that is ~500x slower and unbounded in memory at
+                     # eval.iou_resolution >= 64 -- verified to OOM-crash a
+                     # Colab kernel and even a local machine without this
 
 # Config, plotting, progress
 pyyaml>=6.0
