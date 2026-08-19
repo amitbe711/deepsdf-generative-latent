@@ -144,9 +144,27 @@ def reeval_cell(
         results["reconstruction"] = (previous or {}).get("reconstruction", {})
         status("reusing previous reconstruction metrics", prefix=tag)
     else:
+        # evaluate_reconstruction only ever looks at the first max_recon_shapes
+        # shapes (matched to the same-indexed latent codes), so that is all that
+        # needs rebuilding -- not the full N the checkpoint was trained on. For
+        # N=150 with max_recon_shapes=25 that is a 6x cut in the slowest step
+        # (SDF-sampling meshes from disk).
+        #
+        # Which *mesh file* becomes shape i is deterministic (sorted directory
+        # order, offset=0), so this is always the correct chair regardless of
+        # how many shapes are requested -- verified directly, not assumed.
+        # What is NOT reproducible, with or without this change, is the exact
+        # surface point cloud sampled from that mesh: sample_surface_points
+        # goes through trimesh's own OS-entropy-seeded generator, which
+        # seed_everything() cannot reach, so every rebuild (even at the
+        # original N) redraws different points from the same true surface.
+        # That's harmless Monte Carlo noise in the Chamfer distance -- the
+        # IoU ground truth is the repaired mesh itself (voxelize + marching
+        # cubes, no randomness involved) and is identical either way.
+        recon_shapes = min(num_shapes, int(cfg.eval.max_recon_shapes))
         with Phase("rebuild shapes for reconstruction eval", prefix=tag):
             dataset = ShapeSDFDataset(
-                build_shape_collection(cfg, num_shapes, verbose=verbose, prefix=tag)
+                build_shape_collection(cfg, recon_shapes, verbose=verbose, prefix=tag)
             )
         with Phase("reconstruction metrics", prefix=tag):
             results["reconstruction"] = evaluate_reconstruction(
