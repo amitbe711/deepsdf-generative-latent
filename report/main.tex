@@ -79,15 +79,17 @@ DeepSDF trains on while leaving the training loss looking healthy.
 
 \section{Introduction}
 
-A signed distance function (SDF) represents a surface implicitly as the zero
-level set of $f:\mathbb{R}^3 \to \mathbb{R}$. DeepSDF \citep{park2019deepsdf}
-learns a \emph{single} MLP $f_\theta(\mathbf{z}, \mathbf{x})$ shared across a
-category, conditioning on a per-shape code $\mathbf{z}$ and extracting the
-surface with Marching Cubes \citep{lorensen1987marchingcubes}. It is an
-\emph{auto-decoder}: the codes are free parameters optimized jointly with
-$\theta$. Occupancy Networks \citep{mescheder2019occnet} and IM-Net
-\citep{chen2019imnet} are contemporaneous, and SIREN \citep{sitzmann2020siren}
-improves the fitting of such fields.
+A signed distance function (SDF) represents a surface implicitly, as the zero
+level set of a function $f:\mathbb{R}^3 \to \mathbb{R}$ that outputs the distance
+from a point to the surface. DeepSDF \citep{park2019deepsdf} learns one such
+function per shape \emph{category}: a single MLP $f_\theta(\mathbf{z},
+\mathbf{x})$ that takes a per-shape code $\mathbf{z}$ alongside the query point
+$\mathbf{x}$, so different codes trace out different shapes from the same
+network. Rather than using an encoder to produce $\mathbf{z}$, DeepSDF treats
+each code as a free parameter and optimizes it jointly with the network weights
+--- an \emph{auto-decoder}. Similar implicit representations from the same
+period include occupancy-based networks and periodic-activation networks
+\citep{mescheder2019occnet,sitzmann2020siren}.
 
 DeepSDF's $L_2$ code regularizer is the MAP estimate under a zero-mean Gaussian
 prior, so one could in principle sample $\mathbf{z}\sim\mathcal{N}(0,I)$ and
