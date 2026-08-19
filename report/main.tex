@@ -87,9 +87,7 @@ function per shape \emph{category}: a single MLP $f_\theta(\mathbf{z},
 $\mathbf{x}$, so different codes trace out different shapes from the same
 network. Rather than using an encoder to produce $\mathbf{z}$, DeepSDF treats
 each code as a free parameter and optimizes it jointly with the network weights
---- an \emph{auto-decoder}. Similar implicit representations from the same
-period include occupancy-based networks and periodic-activation networks
-\citep{mescheder2019occnet,sitzmann2020siren}.
+--- an \emph{auto-decoder}.
 
 DeepSDF's $L_2$ code regularizer is the MAP estimate under a zero-mean Gaussian
 prior, so one could in principle sample $\mathbf{z}\sim\mathcal{N}(0,I)$ and
