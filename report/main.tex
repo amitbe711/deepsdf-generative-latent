@@ -245,6 +245,20 @@ detail.}
 \label{fig:gallery}
 \end{figure*}
 
+% Also declared early, for the same top-of-page reason as fig:gallery above,
+% even though it is discussed later (Confirmatory control).
+\begin{figure*}[t]
+\centering
+\includegraphics[width=\textwidth]{itercontrol_gallery.png}
+\caption{Same $N=150,D=16$ shapes reconstructed at the main sweep's
+$8000$-iteration budget (row~2) and the iteration-matched $24000$-iteration
+control (row~3), against ground truth (row~1). Thin structures are somewhat
+better preserved under the matched budget, consistent with the $0.683 \to
+0.789$ IoU improvement reported below, though both budgets still lose fine
+detail relative to ground truth.}
+\label{fig:itercontrol}
+\end{figure*}
+
 \paragraph{The simplest priors win.} \Cref{tab:results} and
 \cref{fig:degradation} report the sweep. The GMM attains the highest Coverage at
 every $N$ ($0.325$, $0.300$, $0.400$) and the Gaussian is close behind ($0.250$,
@@ -293,7 +307,7 @@ cells, confounded with the capacity story above by construction. Re-training
 $N=150,D=16$ alone with $3\times$ the iterations ($24000$, matching $N=50$'s
 per-shape budget) reverses the IoU trend: Chamfer falls to $0.0108$ and IoU
 rises to $0.789$ --- the best reconstruction in the entire study, ahead of
-$N=10$ and $N=50$ at their original budget. The decoder does not run out of
+$N=10$ and $N=50$ at their original budget (\cref{fig:itercontrol}). The decoder does not run out of
 capacity for $150$ chairs; most of the earlier degradation was the
 training-budget confound, not the fixed decoder. Generation does not resolve
 as cleanly: Coverage converges to $0.300$ for all three priors under the
