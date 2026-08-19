@@ -274,6 +274,11 @@ def main() -> None:
         help="only redo generation metrics; keeps the previous reconstruction "
         "numbers and avoids re-sampling the training meshes",
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="re-score cells that already carry these exact eval settings",
+    )
     parser.add_argument("--quiet", action="store_true")
     args = parser.parse_args()
 
@@ -282,12 +287,13 @@ def main() -> None:
         raise SystemExit(f"{output_dir} does not exist")
     verbose = not args.quiet
 
-    overrides = {
-        "eval.num_generated": args.num_generated,
-        "eval.num_reference": args.num_reference,
-        "eval.iou_resolution": args.iou_resolution,
-        "eval.max_recon_shapes": args.max_recon_shapes,
+    protocol = {
+        "num_generated": args.num_generated,
+        "num_reference": args.num_reference,
+        "iou_resolution": args.iou_resolution,
+        "max_recon_shapes": args.max_recon_shapes,
     }
+    overrides = {f"eval.{k}": v for k, v in protocol.items()}
     if args.recon_resolution:
         overrides["eval.recon_resolution"] = args.recon_resolution
     if args.decode_device:
@@ -364,6 +370,13 @@ def main() -> None:
         if metrics_path.exists():
             previous = json.loads(metrics_path.read_text(encoding="utf-8"))
 
+        # Resumable across sessions, like run_grid.py: a Colab runtime that dies
+        # midway can just re-run this command unchanged.
+        if not args.force and previous and previous.get("eval_protocol") == protocol:
+            status(f"{tag} already scored at these settings -- skipping (--force to redo)")
+            summary_by_tag[tag] = previous
+            continue
+
         results = reeval_cell(
             ckpt_path,
             overrides,
@@ -374,12 +387,7 @@ def main() -> None:
             fallback_config=fallback,
             reference_cache=reference_cache,
         )
-        results["eval_protocol"] = {
-            "num_generated": args.num_generated,
-            "num_reference": args.num_reference,
-            "iou_resolution": args.iou_resolution,
-            "max_recon_shapes": args.max_recon_shapes,
-        }
+        results["eval_protocol"] = protocol
 
         _backup_once(metrics_path)
         metrics_path.write_text(json.dumps(results, indent=2), encoding="utf-8")
