@@ -94,11 +94,9 @@ prior, so one could in principle sample $\mathbf{z}\sim\mathcal{N}(0,I)$ and
 decode; in practice the learned codes do not fill an isotropic Gaussian and naive
 sampling breaks. 3D-LDM \citep{nam2022lion3dldm} instead trains a latent
 diffusion model over DeepSDF codes at full ShapeNet scale, following DDPM
-\citep{ho2020ddpm}. Alternatives for small data include shape VAEs with geometric
-augmentation (GLASS~\citep{muralikrishnan2021glass}) and rigidity-regularized
-auto-decoders (ARAPReg~\citep{huang2021arapreg}).
+\citep{ho2020ddpm}.
 
-All of these operate at scale. We ask a controlled question: \emph{on a real
+Both operate at scale. We ask a controlled question: \emph{on a real
 ShapeNet chair subset with small $N$, when does a DDPM over DeepSDF codes beat
 simpler priors?} We hold Stage~1 fixed, vary only the Stage~2 generator, and
 report reconstruction and distribution-level generation metrics
