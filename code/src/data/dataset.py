@@ -12,6 +12,7 @@ Two sources are supported:
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -82,8 +83,8 @@ def _samples_from_mesh(
     return {"points": points, "sdf": sdf, "surface": surface, "mesh": mesh}
 
 
-def _load_meshes_from_dir(path: Path, limit: int | None) -> list[trimesh.Trimesh]:
-    """Load triangle meshes from a directory tree.
+def _mesh_files(path: Path, limit: int | None = None) -> list[Path]:
+    """Mesh file paths under ``path``, in a stable order.
 
     ShapeNetCore v2 layout is supported: ``03001627/<model_id>/models/model_normalized.obj``.
     We prefer ``model_normalized.obj`` (one per model folder) and skip macOS junk.
@@ -104,16 +105,34 @@ def _load_meshes_from_dir(path: Path, limit: int | None) -> list[trimesh.Trimesh
         )
     if limit is not None:
         files = files[:limit]
+    return files
 
-    meshes: list[trimesh.Trimesh] = []
-    for file in files:
+
+def iter_meshes_from_dir(
+    path: Path, limit: int | None = None
+) -> Iterator[trimesh.Trimesh]:
+    """Yield parsed triangle meshes one at a time, skipping unparseable files.
+
+    Streaming instead of returning a list keeps peak memory at a single mesh.
+    Raw ShapeNet chairs are tens of MB each once loaded, so materialising a few
+    hundred at once -- which a 200-shape reference set needs -- is several GB and
+    will OOM a Colab runtime. Every caller consumes meshes strictly in order.
+
+    ``limit`` caps the number of *files* considered, not meshes yielded, matching
+    the previous behaviour so shape selection is unchanged.
+    """
+    for file in _mesh_files(path, limit):
         try:
             loaded = trimesh.load(file, force="mesh", process=False)
         except Exception:
             continue
         if isinstance(loaded, trimesh.Trimesh) and len(loaded.faces) > 0:
-            meshes.append(loaded)
-    return meshes
+            yield loaded
+
+
+def _load_meshes_from_dir(path: Path, limit: int | None) -> list[trimesh.Trimesh]:
+    """Eager :func:`iter_meshes_from_dir`. Only use where ``limit`` is small."""
+    return list(iter_meshes_from_dir(path, limit))
 
 
 def build_shape_collection(
@@ -157,23 +176,23 @@ def build_shape_collection(
         # default 1/64 matches the coarsest recon/eval marching-cubes grid used
         # elsewhere, so it isn't the resolution bottleneck.
         watertight_pitch = data_cfg.get("watertight_pitch", 1.0 / 64.0)
-        meshes = _load_meshes_from_dir(Path(data_cfg.mesh_dir), limit=None)
         end = offset + num_shapes
-        if len(meshes) < end:
-            raise ValueError(
-                f"Requested meshes [{offset}:{end}) but only found {len(meshes)} "
-                f"in {data_cfg.mesh_dir}."
-            )
-        meshes = meshes[offset:end]
         if verbose:
             status(
-                f"SDF-sampling {len(meshes)} meshes from {data_cfg.mesh_dir} "
+                f"SDF-sampling {num_shapes} meshes from {data_cfg.mesh_dir} "
                 f"({num_points} pts/shape; ~2-5 min/mesh from Drive)",
                 prefix=prefix,
             )
         import time as _time
 
-        for i, mesh in enumerate(meshes):
+        # Sample each mesh as it is read and drop the raw geometry immediately;
+        # only the (much smaller) repaired mesh is retained, inside the sample dict.
+        seen = 0
+        for mesh in iter_meshes_from_dir(Path(data_cfg.mesh_dir), limit=end):
+            if seen < offset:
+                seen += 1
+                continue
+            seen += 1
             t_mesh = _time.time()
             collection.append(
                 _samples_from_mesh(
@@ -186,11 +205,20 @@ def build_shape_collection(
                     watertight_pitch=watertight_pitch,
                 )
             )
+            del mesh
             if verbose:
                 status(
-                    f"mesh {i + 1}/{len(meshes)} sampled ({_time.time() - t_mesh:.1f}s)",
+                    f"mesh {len(collection)}/{num_shapes} sampled "
+                    f"({_time.time() - t_mesh:.1f}s)",
                     prefix=prefix,
                 )
+            if len(collection) >= num_shapes:
+                break
+        if len(collection) < num_shapes:
+            raise ValueError(
+                f"Requested meshes [{offset}:{end}) but only {len(collection)} "
+                f"of {seen} parsed successfully in {data_cfg.mesh_dir}."
+            )
     else:
         raise ValueError(f"Unknown data source: {source!r}")
 

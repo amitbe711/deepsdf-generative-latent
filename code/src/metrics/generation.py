@@ -8,17 +8,58 @@ the Chamfer distance. These metrics jointly capture fidelity (MMD), diversity
 from __future__ import annotations
 
 import numpy as np
+from scipy.spatial import cKDTree
 
-from .reconstruction import chamfer_distance
+
+def _prepare(clouds: list[np.ndarray]) -> list[tuple[np.ndarray, cKDTree]]:
+    """Pair each cloud with its KD-tree, built once.
+
+    These metrics are quadratic in the number of shapes, so building a tree per
+    *pair* -- the obvious implementation -- dominates the cost: 1-NN accuracy
+    over G generated and R reference clouds would build 2(G+R)^2 trees where
+    G+R suffice. At G=R=200 that is the difference between minutes and hours.
+    """
+    prepared = []
+    for cloud in clouds:
+        points = np.asarray(cloud, dtype=np.float32)
+        prepared.append((points, cKDTree(points)))
+    return prepared
+
+
+def _chamfer_pair(
+    a: np.ndarray, tree_a: cKDTree, b: np.ndarray, tree_b: cKDTree
+) -> float:
+    """Symmetric Chamfer distance, reusing already-built trees.
+
+    Matches ``reconstruction.chamfer_distance`` exactly; only the trees are hoisted.
+    """
+    dist_a, _ = tree_b.query(a, workers=-1)
+    dist_b, _ = tree_a.query(b, workers=-1)
+    return float(np.mean(dist_a**2) + np.mean(dist_b**2))
 
 
 def _pairwise_chamfer(
     set_a: list[np.ndarray], set_b: list[np.ndarray]
 ) -> np.ndarray:
-    matrix = np.zeros((len(set_a), len(set_b)), dtype=np.float64)
-    for i, a in enumerate(set_a):
-        for j, b in enumerate(set_b):
-            matrix[i, j] = chamfer_distance(a, b)
+    prep_a = _prepare(set_a)
+    prep_b = _prepare(set_b)
+    matrix = np.zeros((len(prep_a), len(prep_b)), dtype=np.float64)
+    for i, (a, tree_a) in enumerate(prep_a):
+        for j, (b, tree_b) in enumerate(prep_b):
+            matrix[i, j] = _chamfer_pair(a, tree_a, b, tree_b)
+    return matrix
+
+
+def _self_pairwise_chamfer(clouds: list[np.ndarray]) -> np.ndarray:
+    """Full square distance matrix of a set against itself, using symmetry."""
+    prep = _prepare(clouds)
+    num = len(prep)
+    matrix = np.zeros((num, num), dtype=np.float64)
+    for i in range(num):
+        a, tree_a = prep[i]
+        for j in range(i + 1, num):
+            b, tree_b = prep[j]
+            matrix[i, j] = matrix[j, i] = _chamfer_pair(a, tree_a, b, tree_b)
     return matrix
 
 
@@ -46,20 +87,33 @@ def coverage(gen_ref_matrix: np.ndarray) -> float:
 
 
 def one_nn_accuracy(
-    generated: list[np.ndarray], reference: list[np.ndarray]
+    generated: list[np.ndarray],
+    reference: list[np.ndarray],
+    gen_ref_matrix: np.ndarray | None = None,
 ) -> float:
     """Leave-one-out 1-NN classifier accuracy over generated (1) vs reference (0).
 
     A perfect generator yields 0.5 (indistinguishable); values near 0 or 1 mean
     the two distributions are easy to tell apart.
+
+    Pass ``gen_ref_matrix`` from :func:`chamfer_matrix` to skip recomputing the
+    cross block, which is a third of the pairs at G=R.
     """
-    combined = list(generated) + list(reference)
-    labels = np.array([1] * len(generated) + [0] * len(reference))
-    num = len(combined)
+    num_gen, num_ref = len(generated), len(reference)
+    labels = np.array([1] * num_gen + [0] * num_ref)
+    num = num_gen + num_ref
     if num < 2:
         return float("nan")
 
-    dist = _pairwise_chamfer(combined, combined)
+    if gen_ref_matrix is None:
+        dist = _self_pairwise_chamfer(list(generated) + list(reference))
+    else:
+        dist = np.empty((num, num), dtype=np.float64)
+        dist[:num_gen, :num_gen] = _self_pairwise_chamfer(generated)
+        dist[num_gen:, num_gen:] = _self_pairwise_chamfer(reference)
+        dist[:num_gen, num_gen:] = gen_ref_matrix
+        dist[num_gen:, :num_gen] = gen_ref_matrix.T
+
     np.fill_diagonal(dist, np.inf)
     nn_idx = dist.argmin(axis=1)
     correct = labels[nn_idx] == labels

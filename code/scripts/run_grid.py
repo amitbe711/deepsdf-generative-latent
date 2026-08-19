@@ -26,7 +26,7 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.data.dataset import ShapeSDFDataset, _load_meshes_from_dir, build_shape_collection  # noqa: E402
+from src.data.dataset import ShapeSDFDataset, build_shape_collection, iter_meshes_from_dir  # noqa: E402
 from src.metrics.generation import (  # noqa: E402
     chamfer_matrix,
     coverage,
@@ -55,15 +55,24 @@ def build_reference_clouds(
     if cfg.data.source == "mesh_dir":
         mesh_dir = Path(cfg.data.mesh_dir)
         need = train_count + num_reference
-        meshes = _load_meshes_from_dir(mesh_dir, limit=need)
-        ref_meshes = meshes[train_count : train_count + num_reference]
-        if len(ref_meshes) >= num_reference:
-            return [
-                sample_surface_points(mesh, surface_points) for mesh in ref_meshes
-            ]
+        # Sample and discard mesh-by-mesh: at a 200-shape reference set the eager
+        # list would hold hundreds of raw ShapeNet meshes (several GB) at once.
+        clouds: list[np.ndarray] = []
+        seen = 0
+        for mesh in iter_meshes_from_dir(mesh_dir, limit=need):
+            if seen < train_count:
+                seen += 1
+                continue
+            seen += 1
+            clouds.append(sample_surface_points(mesh, surface_points))
+            del mesh
+            if len(clouds) >= num_reference:
+                break
+        if len(clouds) >= num_reference:
+            return clouds
         print(
-            f"[warn] only {len(meshes) - train_count} held-out meshes in {mesh_dir}; "
-            "using synthetic chairs as the reference set."
+            f"[warn] only {len(clouds)} held-out meshes in {mesh_dir} "
+            f"(wanted {num_reference}); using synthetic chairs as the reference set."
         )
 
     ref_cfg = cfg.merge({"seed": int(cfg.seed) + 10_000, "data.source": "synthetic"})
@@ -182,11 +191,16 @@ def evaluate_generator(
             "valid_ratio": valid_ratio,
         }
 
+    if verbose:
+        status(
+            f"{generator_name}: {len(gen_clouds)}x{len(reference_clouds)} Chamfer metrics",
+            prefix=prefix,
+        )
     mat = chamfer_matrix(gen_clouds, reference_clouds)
     return {
         "coverage": coverage(mat),
         "mmd": minimum_matching_distance(mat),
-        "one_nn_acc": one_nn_accuracy(gen_clouds, reference_clouds),
+        "one_nn_acc": one_nn_accuracy(gen_clouds, reference_clouds, gen_ref_matrix=mat),
         "valid_ratio": valid_ratio,
     }
 

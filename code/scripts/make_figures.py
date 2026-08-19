@@ -260,14 +260,22 @@ def _render_mesh(ax, mesh, title: str | None = None) -> None:
     )
 
 
-def _ground_truth_meshes(cfg: dict, count: int) -> list:
-    """Training meshes under the same normalization + repair used for supervision."""
+def _ground_truth_meshes(cfg: dict, count: int, pitch: float | None = None) -> list:
+    """Training meshes under the same normalization + repair used for supervision.
+
+    ``pitch`` overrides the watertight voxel size. Leaving it at the config value
+    is the honest default: it shows exactly the surface the decoder was trained
+    against, staircase artifacts and all. A finer pitch renders prettier ground
+    truth, but that surface was never supervised, so reconstructions are then
+    being compared against detail they were never shown.
+    """
     if str(cfg.get("data", {}).get("source", "")) != "mesh_dir":
         return []
     mesh_dir = Path(str(cfg["data"]["mesh_dir"]))
     if not mesh_dir.exists():
         return []
-    pitch = float(cfg["data"].get("watertight_pitch", 1.0 / 64.0))
+    if pitch is None:
+        pitch = float(cfg["data"].get("watertight_pitch", 1.0 / 64.0))
     meshes = []
     for mesh in _load_meshes_from_dir(mesh_dir, limit=count):
         mesh = normalize_mesh_to_unit_sphere(mesh)
@@ -283,6 +291,8 @@ def plot_gallery(
     path: Path,
     cell_tag: str | None = None,
     examples: int = 3,
+    resolution: int | None = None,
+    gt_pitch: float | None = None,
 ) -> None:
     """Render the qualitative gallery for one cell.
 
@@ -329,15 +339,17 @@ def plot_gallery(
 
     codes = ckpt["codes_state"]["embedding.weight"]
     attr_cfg = AttrDict(cfg)
-    # Coarse grids look blocky once rendered as a solid rather than as dots.
-    res = max(int(cfg["eval"]["recon_resolution"]), 64)
+    # Coarse grids look blocky once rendered as a solid rather than as dots. This
+    # only resolves the learned SDF more finely for display; it does not change
+    # the field, so it is free of the fidelity caveat that applies to gt_pitch.
+    res = int(resolution) if resolution else max(int(cfg["eval"]["recon_resolution"]), 64)
 
     def decode(z):
         return decode_mesh(decoder, z.detach().cpu(), resolution=res, device=device)
 
     # One entry per column: (header, meshes down the rows).
     cols: list[tuple[str, list]] = []
-    gt = _ground_truth_meshes(cfg, examples)
+    gt = _ground_truth_meshes(cfg, examples, pitch=gt_pitch)
     if gt:
         cols.append(("Ground truth", gt))
     cols.append(
@@ -369,7 +381,9 @@ def plot_gallery(
     fig.subplots_adjust(
         left=0.005, right=0.995, top=0.94, bottom=0.005, wspace=0.0, hspace=0.0
     )
-    fig.savefig(path, dpi=150, bbox_inches="tight")
+    # 300 dpi: this is the one figure whose content is fine geometric detail, and
+    # it is printed near \textwidth, so 150 dpi visibly aliases the mesh edges.
+    fig.savefig(path, dpi=300, bbox_inches="tight")
     plt.close(fig)
 
 
@@ -388,6 +402,22 @@ def main() -> None:
         type=int,
         default=3,
         help="rows in the gallery, i.e. independent draws per category",
+    )
+    parser.add_argument(
+        "--gallery-resolution",
+        type=int,
+        default=128,
+        help="marching-cubes grid for decoded gallery meshes (display only)",
+    )
+    parser.add_argument(
+        "--gallery-gt-pitch",
+        type=float,
+        default=None,
+        help=(
+            "override the watertight voxel pitch for the ground-truth column, e.g. "
+            "0.0078125 for 1/128. Default follows the config, i.e. shows the surface "
+            "the decoder was actually trained on"
+        ),
     )
     args = parser.parse_args()
 
@@ -412,6 +442,8 @@ def main() -> None:
         fig_dir / "gallery.png",
         args.gallery_cell,
         args.gallery_examples,
+        args.gallery_resolution,
+        args.gallery_gt_pitch,
     )
     print(f"Wrote tables and figures -> {fig_dir}")
 
