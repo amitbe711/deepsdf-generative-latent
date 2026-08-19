@@ -1,0 +1,93 @@
+# Confirmatory control for the N-sweep: is the N=150 reconstruction drop a
+# fixed-decoder *capacity* effect (the "Trend with N" story in the report), or
+# is it partly an artefact of the fixed training budget?
+#
+# random_batch() in src/data/dataset.py samples `shapes_per_batch` shapes
+# *without replacement* each step (src/data/dataset.py:254-255). With
+# shapes_per_batch=48 fixed across the whole grid (configs/shapenet_grid.yaml),
+# a given shape's code z_i is updated on a fraction min(48, N)/N of steps:
+#   N=10:  min(48,10)/10  = 100%  -> ~8000 updates over 8000 iters
+#   N=50:  min(48,50)/50  =  96%  -> ~7680 updates over 8000 iters
+#   N=150: min(48,150)/150 = 32%  -> ~2560 updates over 8000 iters
+# So at fixed num_iters=8000, N=150 shapes see ~3x fewer gradient updates than
+# N=10/50 shapes -- a confound entangled with capacity dilution in the main
+# grid's own numbers (reconstruction IoU 0.784 -> 0.736 -> 0.683).
+#
+# This config re-trains only the N=150, D=16 cell with num_iters=24000 (3x),
+# which brings expected per-shape updates to ~7680 -- matching N=50's budget
+# above (as close as N=150's 32%-per-step rate allows to N=10's 100%). Same
+# shapes_per_batch=48, so the per-step compute cost and everything else about
+# the cell is unchanged; only the number of steps differs.
+#
+# Everything else is identical to configs/shapenet_grid.yaml. Run via:
+#   python scripts/run_grid.py --config configs/shapenet_n150_itercontrol.yaml \
+#       --output outputs/shapenet_n150_itercontrol
+# (patch_config in the Colab driver still needs to set data.source/mesh_dir/
+# device the same way it does for shapenet_grid.yaml.)
+seed: 0
+device: cuda
+
+data:
+  source: mesh_dir
+  mesh_dir: /local_disk0/3d_project/shapenet/03001627
+  num_points: 8000
+  surface_ratio: 0.9
+  sigmas: [0.005, 0.02]
+  num_surface_points: 2048
+  mesh_resolution: 48
+
+decoder:
+  hidden_dim: 256
+  num_layers: 8
+  skip_in: [4]
+  dropout_prob: 0.0
+  use_weight_norm: true
+  use_tanh: false
+  geometric_init: true
+  init_radius: 0.5
+
+stage1:
+  num_iters: 24000   # 3x the grid's 8000 -- see header comment
+  shapes_per_batch: 48
+  points_per_shape: 1024
+  lr_decoder: 1.0e-3
+  lr_codes: 1.0e-3
+  clamp_delta: 0.1
+  code_init_std: 0.01
+  code_reg_lambda: 1.0e-4
+
+gaussian:
+  covariance: full
+  reg: 1.0e-5
+
+gmm:
+  num_components: 5
+  reg: 1.0e-5
+  max_iters: 200
+  min_points_per_component: 5
+
+ddpm:
+  num_timesteps: 200
+  beta_start: 1.0e-4
+  beta_end: 0.02
+  schedule: cosine
+  hidden_dim: 256
+  num_layers: 4
+  time_embed_dim: 64
+  lr: 1.0e-3
+  num_iters: 3000
+  batch_size: 64
+
+eval:
+  num_generated: 40
+  num_reference: 40
+  surface_points: 2048
+  recon_resolution: 48
+  iou_resolution: 32
+  max_recon_shapes: 10
+  decode_device: cpu
+
+grid:
+  N: [150]
+  D: [16]
+  generators: [gaussian, gmm, ddpm]
