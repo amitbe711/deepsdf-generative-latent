@@ -5,7 +5,8 @@ Reads ``<output>/summary.json`` (produced by run_grid.py) and writes:
   * degradation_generation.png          - Coverage / MMD / 1-NN vs N,
   * degradation_reconstruction.png      - Chamfer / IoU vs N,
   * loss_curves.png                     - Stage-1 and DDPM training losses,
-  * gallery.png                         - GT / recon / one row per generator.
+  * gallery.png                         - GT / recon / one row per generator,
+  * latent_scatter.png                  - real codes vs. samples per prior (PCA).
 
 The experiment grid is deliberately ragged (one latent dimension carries the
 N-sweep; any other D appears at a single N as an ablation), so the degradation
@@ -387,6 +388,98 @@ def plot_gallery(
     plt.close(fig)
 
 
+def _pca_2d(codes: torch.Tensor) -> np.ndarray:
+    """Return the (2, D) top-2 PCA projection matrix for ``codes``.
+
+    No sklearn dependency: mean-centered SVD's top-2 right singular vectors
+    are exactly PCA's top-2 components, and every code matrix here is small
+    enough (N<=150, D in {16,32,512}) for a dense SVD to be instant.
+    """
+    centered = codes - codes.mean(dim=0, keepdim=True)
+    _, _, vh = torch.linalg.svd(centered, full_matrices=False)
+    return vh[:2].numpy()
+
+
+def plot_latent_space(
+    summary: list[dict],
+    input_dir: Path,
+    path: Path,
+    cell_tag: str | None = None,
+    num_samples: int | None = None,
+) -> None:
+    """Scatter the frozen Stage-1 codes against samples from each fitted prior.
+
+    Coverage and MMD are single numbers computed from exactly this comparison;
+    this is the picture behind them, showing whether a prior's samples spread
+    across the real codes (good coverage) or huddle in one corner / drift
+    outside the real cluster. The PCA basis is fit once on the real codes, so
+    every panel shares the same 2D axes and is directly comparable.
+    """
+    if cell_tag is not None:
+        by_tag = {f"N{c['N']}_D{c['D']}": c for c in summary}
+        if cell_tag not in by_tag:
+            raise SystemExit(
+                f"latent-scatter cell {cell_tag!r} not in summary; have {sorted(by_tag)}"
+            )
+        cell = by_tag[cell_tag]
+    else:
+        cell = max(summary, key=lambda c: c["N"])
+    tag = f"N{cell['N']}_D{cell['D']}"
+    ckpt_path = input_dir / tag / "checkpoint.pt"
+    if not ckpt_path.exists():
+        return
+    ckpt = load_checkpoint(ckpt_path)
+    cfg = ckpt["config"]
+    attr_cfg = AttrDict(cfg)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    codes = ckpt["codes_state"]["embedding.weight"]
+    samples = int(num_samples) if num_samples else int(cfg["eval"]["num_generated"])
+    basis = _pca_2d(codes)
+    mean = codes.mean(dim=0, keepdim=True).numpy()
+
+    def project(z: torch.Tensor) -> np.ndarray:
+        return (z.detach().cpu().numpy() - mean) @ basis.T
+
+    real_xy = project(codes)
+
+    generators = list(cfg.get("grid", {}).get("generators", ["gaussian"]))
+    panels: list[tuple[str, np.ndarray]] = []
+    if "gaussian" in generators:
+        rng = torch.Generator().manual_seed(0)
+        z = fit_gaussian(attr_cfg, codes).sample(samples, generator=rng)
+        panels.append(("Gaussian", project(z)))
+    if "gmm" in generators:
+        rng = torch.Generator().manual_seed(1)
+        z = fit_gmm(attr_cfg, codes).sample(samples, generator=rng)
+        panels.append(("GMM", project(z)))
+    if "ddpm" in generators:
+        ddpm = train_ddpm(attr_cfg, codes, device=device, progress=False)["model"]
+        z = ddpm.sample(samples, device=device).cpu()
+        panels.append(("DDPM", project(z)))
+    if not panels:
+        return
+
+    ncols = len(panels)
+    fig, axes = plt.subplots(
+        1, ncols, figsize=(4.2 * ncols, 4.2), sharex=True, sharey=True
+    )
+    axes = [axes] if ncols == 1 else list(axes)
+    for ax, (name, xy) in zip(axes, panels):
+        ax.scatter(real_xy[:, 0], real_xy[:, 1], s=14, c="0.6", label="real codes", zorder=1)
+        ax.scatter(
+            xy[:, 0], xy[:, 1], s=10, c="tab:red", alpha=0.6, label=f"{name} samples", zorder=2
+        )
+        ax.set_title(name)
+        ax.set_xlabel("PC1")
+        ax.legend(fontsize=8, loc="best")
+    axes[0].set_ylabel("PC2")
+    fig.suptitle(f"Latent codes vs. prior samples -- {tag} (PCA basis fit on real codes)")
+    fig.tight_layout()
+    fig.savefig(path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", type=str, default="outputs/grid")
@@ -419,6 +512,18 @@ def main() -> None:
             "the decoder was actually trained on"
         ),
     )
+    parser.add_argument(
+        "--latent-scatter-cell",
+        type=str,
+        default=None,
+        help="cell for the latent-space scatter, e.g. N150_D16 (default: largest N)",
+    )
+    parser.add_argument(
+        "--latent-scatter-samples",
+        type=int,
+        default=None,
+        help="samples per prior in the scatter (default: eval.num_generated)",
+    )
     args = parser.parse_args()
 
     input_dir = Path(args.input)
@@ -444,6 +549,13 @@ def main() -> None:
         args.gallery_examples,
         args.gallery_resolution,
         args.gallery_gt_pitch,
+    )
+    plot_latent_space(
+        summary,
+        input_dir,
+        fig_dir / "latent_scatter.png",
+        args.latent_scatter_cell,
+        args.latent_scatter_samples,
     )
     print(f"Wrote tables and figures -> {fig_dir}")
 

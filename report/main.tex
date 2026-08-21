@@ -66,19 +66,16 @@ codes, so drawing new codes at random rarely decodes to a valid shape. Latent
 diffusion (3D-LDM~\citep{nam2022lion3dldm}) fixes this at full ShapeNet scale,
 but its benefit over a trivial Gaussian prior in the low-data, low-capacity
 regime is unstudied. I train a DeepSDF auto-decoder on ShapeNet chairs, freeze
-it, and fit three priors over the resulting codes---a multivariate Gaussian, a
-Gaussian mixture (GMM), and a DDPM denoising the codes directly---as the dataset
+it, and fit three priors over the resulting codes-a multivariate Gaussian, a
+Gaussian mixture (GMM), and a DDPM denoising the codes directly-as the dataset
 shrinks, $N \in \{10,50,150\}$. Diffusion does not pay for itself here: the GMM
 attains the best Coverage at every $N$ and the Gaussian is close behind, while
 the DDPM wins no cell, is worst on most generation metrics at $N=150$, and at
 $N=10$ yields an extractable surface for only $15\%$ of its samples against
-$100\%$ for the Gaussian. I also report two confounds a small-data study like
-this one is exposed to and easy to misdiagnose: raw ShapeNet meshes are not
-watertight, which corrupts the SDF \emph{sign} DeepSDF trains on while leaving
-the training loss looking healthy; and, separately, a fixed training budget
-is entangled with $N$ by construction, so a chunk of the apparent
-reconstruction degradation at large $N$ is a training-budget artifact rather
-than a capacity limit, as a matched-budget control confirms.
+$100\%$ for the Gaussian. I also report a pitfall that is easy to misdiagnose
+in a small-data study like this one: raw ShapeNet meshes are not watertight
+(closed) solids, which corrupts the inside/outside sign DeepSDF trains on
+while the training loss still looks healthy.
 \end{abstract}
 
 \section{Introduction}
@@ -91,7 +88,7 @@ function per shape \emph{category}: a single MLP $f_\theta(\mathbf{z},
 $\mathbf{x}$, so different codes trace out different shapes from the same
 network. Rather than using an encoder to produce $\mathbf{z}$, DeepSDF treats
 each code as a free parameter and optimizes it jointly with the network weights
---- an \emph{auto-decoder}. The signed distance is one of several implicit
+- an \emph{auto-decoder}. The signed distance is one of several implicit
 targets a network can be trained to predict: Occupancy Networks
 \citep{mescheder2019occnet} and IM-Net \citep{chen2019imnet} predict
 inside/outside occupancy instead. This paper keeps that choice of
@@ -113,21 +110,12 @@ Both operate at scale. My question is narrower and controlled: \emph{on a real
 ShapeNet chair subset with small $N$, when does a DDPM over DeepSDF codes beat
 simpler priors?} I hold Stage~1 fixed, vary only the Stage~2 generator, and
 report reconstruction and distribution-level generation metrics. This
-comparison is the paper's first contribution, and the answer turns out to be
+comparison is the paper's main contribution, and the answer turns out to be
 negative for diffusion: at small $N$, a plain Gaussian or a Gaussian mixture
 matches or beats the DDPM. That is a useful result rather than a disappointing
 one, because it suggests 3D-LDM's advantage over simpler priors comes from the
 amount of data it was trained on, not from diffusion being intrinsically
-better at modeling the latent space.
-
-The paper's second contribution is diagnostic, and came from a problem I did
-not set out to study. Getting \emph{any} coherent chair out of the pipeline at
-all turned out to be dominated by a data bug rather than by the generator or
-the optimizer (\cref{sec:watertight}). Its most confusing symptom was that
-giving the decoder more capacity \emph{lowered} the training loss while making
-the extracted mesh \emph{worse} --- the kind of result that looks like an
-optimization failure but is actually a sign that the training labels
-themselves are wrong. All training code is my own.
+better at modeling the latent space. All training code is my own.
 
 \section{Method}
 
@@ -161,21 +149,17 @@ The label in \cref{eq:stage1} is a \emph{signed} distance, so it presupposes a
 closed surface. Raw ShapeNetCore OBJs are not: they are assembled \emph{shells},
 and a representative chair from synset \texttt{03001627} decomposes into $313$
 disconnected components never welded into one manifold. On such input
-\texttt{trimesh}'s winding-number query has no coherent interior to test against
-and its sign is close to meaningless --- on one chair only ${\approx}1\%$ of
-sampled points were labelled inside, against ${\approx}38\%$ at the \emph{same}
-locations after repair.
+\texttt{trimesh}'s winding-number query has no coherent interior to test
+against, so only ${\approx}1\%$ of sampled points were labelled inside, versus
+${\approx}38\%$ at the same locations after repair.
 
-The failure signature matters. With nearly every near-surface label positive, the
-network fits something closer to an unsigned field with no interior, so its zero
-level set is not a closed surface and Marching Cubes returns fragments --- while
-the point-wise loss stays low, because the decoder faithfully fits the labels it
-was given. No downstream tuning can repair a corrupted label. I therefore
-voxelize each non-watertight mesh at pitch $1/64$, fill the interior, and re-mesh
-with Marching Cubes, yielding a single closed solid regardless of input topology.
-Detail thinner than the pitch is lost: a slightly thickened chair with correct
-signs is a learnable target, whereas a perfectly detailed chair with arbitrary
-signs is not.
+With nearly every near-surface label positive, the network fits an unsigned
+field with no interior, so Marching Cubes returns fragments - while the
+point-wise loss stays low, since the decoder faithfully fits whatever labels it
+was given. No downstream tuning can repair a corrupted label, so I instead
+voxelize each non-watertight mesh at pitch $1/64$, fill the interior, and
+re-mesh with Marching Cubes, yielding a single closed solid regardless of input
+topology, at the cost of detail thinner than the pitch.
 
 \subsection{Stage 2: priors over frozen codes}
 I freeze $f_\theta$ and $\{\mathbf{z}_i\}$ and fit three generators spanning a
@@ -237,8 +221,8 @@ $D=16$. The dashed line marks the ideal 1-NN accuracy of $0.5$.}
 \caption{Qualitative results at $N=150$, $D=16$, as shaded solids. Columns:
 ground-truth chair, its reconstruction from the learned code, then one sample
 each from the Gaussian, GMM, and DDPM priors; rows are independent draws.
-Reconstructions preserve the coarse massing but lose thin structure --- the sled
-legs of row~1 and the back slats of row~2 --- and fare best on the bulky armchair
+Reconstructions preserve the coarse massing but lose thin structure - the sled
+legs of row~1 and the back slats of row~2 - and fare best on the bulky armchair
 of row~3. All three priors emit chair-like solids at this $N$, consistent with
 the valid ratio of $1.00$ in \cref{tab:results}, with visible holes and melted
 detail.}
@@ -293,8 +277,8 @@ improves sharply from $N=10$ to $N=50$ ($0.100 \to 0.275$ Coverage, $0.15 \to
 alone. Reconstruction Chamfer is not monotone ($0.0151$, $0.0361$, $0.0122$) and
 I read the IoU trend as the reliable one: Chamfer is an unbounded average over
 ten shapes, so one poor decode can dominate it, whereas IoU is bounded in
-$[0,1]$. The obvious reading of the IoU trend --- a fixed-width decoder running
-out of room for $150$ chairs --- turns out to be wrong, as the next paragraph
+$[0,1]$. The obvious reading of the IoU trend - a fixed-width decoder running
+out of room for $150$ chairs - turns out to be wrong, as the next paragraph
 shows.
 
 \paragraph{Confirmatory control: capacity or training budget?}
@@ -302,18 +286,18 @@ shows.
 \emph{without replacement} every step, and that count is fixed across the
 whole sweep, so a given shape's code is updated on only a $\min(48,N)/N$
 fraction of steps: $100\%$ at $N=10$, $96\%$ at $N=50$, but $32\%$ at $N=150$
---- roughly $3\times$ fewer gradient updates per shape than the other two
+- roughly $3\times$ fewer gradient updates per shape than the other two
 cells, confounded with the capacity story above by construction. Re-training
 $N=150,D=16$ alone with $3\times$ the iterations ($24000$, matching $N=50$'s
 per-shape budget) reverses the IoU trend: Chamfer falls to $0.0108$ and IoU
-rises to $0.789$ --- the best reconstruction in the entire study, ahead of
+rises to $0.789$ - the best reconstruction in the entire study, ahead of
 $N=10$ and $N=50$ at their original budget (\cref{fig:itercontrol}). The decoder does not run out of
 capacity for $150$ chairs; most of the earlier degradation was the
 training-budget confound, not the fixed decoder. Generation does not resolve
 as cleanly: Coverage converges to $0.300$ for all three priors under the
 matched budget (Gaussian $0.325\to0.300$, GMM $0.400\to0.300$, DDPM
 $0.225\to0.300$), so the better-trained codes are, if anything, \emph{harder}
-for the classical priors to cover --- plausibly because their norm grows
+for the classical priors to cover - plausibly because their norm grows
 further ($\lVert\mathbf{z}\rVert=0.517$, above the $0.29$--$0.41$ range of the
 main sweep) as the codes differentiate more per shape. MMD and 1-NN still
 favor Gaussian and GMM over the DDPM at the matched budget ($0.0349$/$0.0380$
@@ -322,8 +306,8 @@ is unaffected, but the specific claim that DDPM is worst on \emph{every}
 generation metric at $N=150$ does not survive a fair training budget.
 
 \paragraph{Latent dimension, and a correction.} Doubling $D$ to $32$ at $N=50$
-helps Stage~1 --- Chamfer $0.0361 \to 0.0145$, IoU $0.736 \to 0.814$, the best
-reconstruction in the study --- and hurts Stage~2, with Coverage down for all
+helps Stage~1 - Chamfer $0.0361 \to 0.0145$, IoU $0.736 \to 0.814$, the best
+reconstruction in the study - and hurts Stage~2, with Coverage down for all
 three priors and the DDPM degrading sharply (MMD $0.0229 \to 0.0506$, valid $1.00
 \to 0.85$). Wider codes give Stage~1 more room per shape, but Stage~2 must then
 estimate a density in $\mathbb{R}^{32}$ from the same $50$ points. This
@@ -340,8 +324,8 @@ inversion was never re-run post-repair.
 metrics cannot provide, since Chamfer distance is forgiving of a shape with
 roughly the right mass in roughly the right places. Reconstruction degrades
 exactly where the repair of \cref{sec:watertight} predicts: the bulky armchair
-survives well, while the sled legs and back slats --- structures thinner than the
-$1/64$ voxel pitch --- are thickened, holed, or lost. That is what holds 1-NN
+survives well, while the sled legs and back slats - structures thinner than the
+$1/64$ voxel pitch - are thickened, holed, or lost. That is what holds 1-NN
 accuracy near $1.0$ regardless of the prior, and it is a Stage-1 ceiling no
 generator can lift.
 
@@ -350,8 +334,8 @@ chair-like solids with recognizable seats and backs, all three show the same
 melted surfaces and holes, and all three occasionally emit something degenerate:
 a spindly frame with no seat (Gaussian, row~2), a flattened slab (GMM, row~3).
 This seems like the honest reading rather than a limitation of the figure. The
-measured gaps at $N=150$ are \emph{distributional} --- Coverage $0.400$ for the
-GMM against $0.225$ for the DDPM --- and three draws per prior cannot resolve a
+measured gaps at $N=150$ are \emph{distributional} - Coverage $0.400$ for the
+GMM against $0.225$ for the DDPM - and three draws per prior cannot resolve a
 difference in how much of the reference set gets matched. Per-sample
 plausibility, which is what the eye judges here, is roughly comparable. The
 contrast with $N=10$ is the point: there the DDPM's deficit was catastrophic and
@@ -381,14 +365,14 @@ DDPM won no cell, was worst on most generation metrics at $N=150$ (a
 training-budget-matched control closes the Coverage gap there but leaves MMD
 and 1-NN unchanged), and decoded to
 a surface only $15\%$ of the time at $N=10$. Since 1-NN accuracy never fell below
-$0.900$ against an ideal of $0.5$, what is being ranked is degrees of failure ---
+$0.900$ against an ideal of $0.5$, what is being ranked is degrees of failure -
 but the ranking is consistent, and it locates the benefit of latent diffusion in
 the data scale it was demonstrated at rather than in the mechanism.
 
 The more transferable lesson is that the failure which dominated my results
 presented as an optimization problem while being a data problem
-(\cref{sec:watertight}), and that its most confusing symptom --- capacity
-simultaneously lowering training loss and worsening geometry --- vanished once
+(\cref{sec:watertight}), and that its most confusing symptom - capacity
+simultaneously lowering training loss and worsening geometry - vanished once
 the labels were repaired. The monitored quantity moved reassuringly throughout.
 On a pipeline that ends in Marching Cubes, point-wise loss is a weak proxy for
 the surface, and geometry has to be inspected directly. A second instance of
